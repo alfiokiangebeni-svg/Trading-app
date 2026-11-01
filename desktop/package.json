@@ -3,7 +3,10 @@
   "productName": "Alerte Trading",
   "version": "2.0.0",
   "description": "Alerte Trading pour PC : analyse Or et Bitcoin (SMC, CRT, Price Action).",
-  "author": "Alerte Trading",
+  "author": {
+    "name": "Alerte Trading",
+    "email": "alerte-trading@users.noreply.github.com"
+  },
   "main": "main.js",
   "private": true,
   "scripts": {
@@ -19,12 +22,69 @@
     "appId": "com.alertetrading.desktop",
     "productName": "Alerte Trading",
     "artifactName": "Alerte-Trading-${version}-${os}-${arch}.${ext}",
-    "files": ["main.js", "app/**/*"],
-    "directories": { "output": "dist", "buildResources": "build" },
-    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "portable", "arch": ["x64"] }], "icon": "app/icons/icon-512.png" },
-    "portable": { "artifactName": "Alerte-Trading-${version}-portable.${ext}" },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "shortcutName": "Alerte Trading" },
-    "mac": { "target": [{ "target": "dmg", "arch": ["universal"] }], "icon": "app/icons/icon-1024.png", "category": "public.app-category.finance", "identity": null },
-    "linux": { "target": ["AppImage", "deb"], "icon": "app/icons/icon-512.png", "category": "Finance", "maintainer": "Alerte Trading" }
+    "files": [
+      "main.js",
+      "app/**/*"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "app/icons/icon-512.png"
+    },
+    "portable": {
+      "artifactName": "Alerte-Trading-${version}-portable.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Alerte Trading"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "icon": "app/icons/icon-1024.png",
+      "category": "public.app-category.finance",
+      "identity": null
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "app/icons/icon-512.png",
+      "category": "Finance",
+      "maintainer": "Alerte Trading",
+      "syncDesktopName": true
+    },
+    "publish": null
+  },
+  "homepage": "https://github.com/alfiokiangebeni-svg/Trading-app",
+  "desktopName": "alerte-trading.desktop",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alfiokiangebeni-svg/Trading-app.git"
   }
 }

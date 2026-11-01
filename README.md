@@ -48,7 +48,7 @@ En mode « Alertes en direct », les cours publics sont relus toutes les 20 s (1
 |---|---|
 | **Android** (7 à 16) | APK dans les [Releases](https://github.com/alfiokiangebeni-svg/Trading-app/releases/latest), ou ouvrez la version Chrome sur le téléphone puis menu ⋮ → « Installer l'application ». |
 | **PC** Windows · macOS · Linux | Installateur `.exe` / portable, `.dmg`, `.AppImage` / `.deb` dans les [Releases](https://github.com/alfiokiangebeni-svg/Trading-app/releases/latest). Ou bouton « Installer » dans Chrome / Edge. |
-| **Chrome** | https://alfiokiangebeni-svg.github.io/Trading-app/ (après activation de GitHub Pages : Settings → Pages → Source « GitHub Actions »). |
+| **Chrome** | https://alfiokiangebeni-svg.github.io/Trading-app/ (GitHub Pages, publié depuis la branche `main`). |
 
 Les APK et installateurs sont compilés automatiquement par GitHub Actions (`.github/workflows/build-apps.yml`) à chaque push, puis publiés dans la release `v2.0.0`.
 
