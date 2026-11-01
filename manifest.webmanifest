@@ -1,0 +1,25 @@
+{
+  "id": "./",
+  "name": "Alerte Trading — Or & Bitcoin",
+  "short_name": "Alerte Trading",
+  "description": "Analyse XAU/USD et BTC/USD en SMC, CRT et Price Action : signaux scalping et day trading, backtest, risque 1 à 2 %.",
+  "lang": "fr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
+  "background_color": "#05070b",
+  "theme_color": "#05070b",
+  "categories": ["finance", "business"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "Or XAU/USD", "url": "./index.html?sym=XAU", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Bitcoin BTC/USD", "url": "./index.html?sym=BTC", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

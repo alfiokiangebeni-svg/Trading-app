@@ -1,0 +1,100 @@
+name: Applications (Android + PC)
+
+on:
+  push:
+    branches: [main, claude/trading-analysis-app-gold-btc-zdnf42]
+    paths-ignore: ['README.md']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apps-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APP_VERSION: 2.0.0
+
+jobs:
+  android:
+    name: APK Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21, cache: gradle }
+      - run: npm ci
+      - run: npm run build:web && npx cap sync android
+      - name: Build APK
+        working-directory: android
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon --stacktrace
+      - run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk "out/Alerte-Trading-${APP_VERSION}-android.apk"
+      - uses: actions/upload-artifact@v4
+        with: { name: android, path: out/*.apk, if-no-files-found: error }
+
+  desktop:
+    name: PC ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: desktop/package-lock.json }
+      - working-directory: desktop
+        run: npm ci
+      - working-directory: desktop
+        run: npm run prepare-app
+      - working-directory: desktop
+        run: npx electron-builder --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.dmg
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+
+  release:
+    name: Publier les téléchargements
+    needs: [android, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: files, merge-multiple: true }
+      - run: ls -la files
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.APP_VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: Alerte Trading ${{ env.APP_VERSION }}
+          make_latest: true
+          overwrite_files: true
+          files: files/*
+          body: |
+            **Alerte Trading** — analyse Or (XAU/USD) et Bitcoin (BTC/USD) en SMC, CRT et Price Action.
+
+            | Plateforme | Fichier |
+            |---|---|
+            | Android 7 à 16 | `Alerte-Trading-${{ env.APP_VERSION }}-android.apk` |
+            | Windows (installateur) | `Alerte-Trading-${{ env.APP_VERSION }}-win-x64.exe` |
+            | Windows (sans installation) | `Alerte-Trading-${{ env.APP_VERSION }}-portable.exe` |
+            | macOS (Intel + Apple Silicon) | `Alerte-Trading-${{ env.APP_VERSION }}-mac-universal.dmg` |
+            | Linux | `.AppImage` ou `.deb` |
+
+            **Android** : téléchargez l'APK sur le téléphone, ouvrez-le et autorisez « Installer des applications inconnues » pour votre navigateur.
+            **Windows** : si SmartScreen s'affiche, cliquez « Informations complémentaires » puis « Exécuter quand même » (application non signée).
+            **macOS** : clic droit sur l'application → Ouvrir (application non signée).
+
+            Outil d'aide à la décision, pas un conseil en investissement. Aucun résultat n'est garanti.

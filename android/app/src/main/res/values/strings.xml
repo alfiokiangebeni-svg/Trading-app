@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Alerte Trading</string>
+    <string name="title_activity_main">Alerte Trading</string>
+    <string name="package_name">com.alertetrading.app</string>
+    <string name="custom_url_scheme">com.alertetrading.app</string>
+</resources>

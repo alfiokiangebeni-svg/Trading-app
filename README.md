@@ -42,10 +42,32 @@ L'or est suivi via **PAXG**, un jeton adossé à une once d'or physique : il sui
 
 En mode « Alertes en direct », les cours publics sont relus toutes les 20 s (1m) ou 45 s (autres UT).
 
-## Lancer
+## Télécharger / ouvrir
 
-Ouvrez `index.html` dans un navigateur, ou publiez le dépôt avec GitHub Pages (Settings → Pages → branche `main`, dossier racine).
+| Version | Comment |
+|---|---|
+| **Android** (7 à 16) | APK dans les [Releases](https://github.com/alfiokiangebeni-svg/Trading-app/releases/latest), ou ouvrez la version Chrome sur le téléphone puis menu ⋮ → « Installer l'application ». |
+| **PC** Windows · macOS · Linux | Installateur `.exe` / portable, `.dmg`, `.AppImage` / `.deb` dans les [Releases](https://github.com/alfiokiangebeni-svg/Trading-app/releases/latest). Ou bouton « Installer » dans Chrome / Edge. |
+| **Chrome** | https://alfiokiangebeni-svg.github.io/Trading-app/ (après activation de GitHub Pages : Settings → Pages → Source « GitHub Actions »). |
+
+Les APK et installateurs sont compilés automatiquement par GitHub Actions (`.github/workflows/build-apps.yml`) à chaque push, puis publiés dans la release `v2.0.0`.
+
+### Compiler soi-même
+
+```bash
+npm ci
+npm run android:apk          # APK debug dans android/app/build/outputs/apk/debug/ (Android SDK + JDK 21 requis)
+npm run android:open         # ou ouvrir le projet dans Android Studio
+
+cd desktop && npm ci
+npm run prepare-app && npm start     # lancer l'app PC
+npx electron-builder                 # créer l'installateur pour votre système
+```
 
 ## Technique
+
+- Android : Capacitor 8 (cible Android 16 / API 36, minimum Android 7 / API 24).
+- PC : Electron, installateurs via electron-builder.
+- Web : PWA installable (manifeste + service worker, fonctionne hors ligne pour l'interface).
 
 Une seule page HTML, sans build : graphique [Lightweight Charts](https://github.com/tradingview/lightweight-charts) 4.1.3, moteurs d'analyse et backtest en JavaScript, préférences enregistrées dans le navigateur.

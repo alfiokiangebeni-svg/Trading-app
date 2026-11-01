@@ -1,0 +1,9 @@
+{
+  "appId": "com.alertetrading.app",
+  "appName": "Alerte Trading",
+  "webDir": "www",
+  "backgroundColor": "#05070b",
+  "android": {
+    "allowMixedContent": false
+  }
+}

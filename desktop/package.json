@@ -1,0 +1,30 @@
+{
+  "name": "alerte-trading-desktop",
+  "productName": "Alerte Trading",
+  "version": "2.0.0",
+  "description": "Alerte Trading pour PC : analyse Or et Bitcoin (SMC, CRT, Price Action).",
+  "author": "Alerte Trading",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "prepare-app": "cd .. && node scripts/build-web.mjs desktop/app",
+    "start": "electron .",
+    "dist": "electron-builder --publish never"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.alertetrading.desktop",
+    "productName": "Alerte Trading",
+    "artifactName": "Alerte-Trading-${version}-${os}-${arch}.${ext}",
+    "files": ["main.js", "app/**/*"],
+    "directories": { "output": "dist", "buildResources": "build" },
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "portable", "arch": ["x64"] }], "icon": "app/icons/icon-512.png" },
+    "portable": { "artifactName": "Alerte-Trading-${version}-portable.${ext}" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "shortcutName": "Alerte Trading" },
+    "mac": { "target": [{ "target": "dmg", "arch": ["universal"] }], "icon": "app/icons/icon-1024.png", "category": "public.app-category.finance", "identity": null },
+    "linux": { "target": ["AppImage", "deb"], "icon": "app/icons/icon-512.png", "category": "Finance", "maintainer": "Alerte Trading" }
+  }
+}
