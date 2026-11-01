@@ -31,8 +31,16 @@ Chaque signal affiche le sens (ACHAT / VENTE), l'entrée, le stop loss, l'object
 
 ## Données de marché
 
-- **Dans Claude** : la page lit les cours réels via le connecteur **Cubrik** (`get_candles`) de l'utilisateur. Si le connecteur n'est pas disponible, elle bascule sur des données de démonstration clairement signalées.
-- **Ouverte directement dans un navigateur** (ce fichier `index.html`) : pas d'accès au connecteur, la page fonctionne avec les données de démonstration. Pour des cours réels hors de Claude, il faut brancher une source de données (API d'un broker ou d'un fournisseur) dans la fonction `fetchCandles`.
+La page cherche les cours dans cet ordre et affiche la source utilisée en haut à droite :
+
+1. **Connecteur Cubrik** (`get_candles`) quand la page est ouverte dans Claude.
+2. **API publique Binance** (`data-api.binance.vision`, sans clé) : `BTCUSDT` pour le bitcoin, `PAXGUSDT` pour l'or.
+3. **API publique Coinbase** (sans clé) si Binance est injoignable : `BTC-USD` et `PAXG-USD` (le 4h est reconstruit à partir du 1h).
+4. **Données de démonstration**, clairement signalées, si aucune source ne répond.
+
+L'or est suivi via **PAXG**, un jeton adossé à une once d'or physique : il suit le XAU/USD spot à quelques dollars près et cote 24 h/24, 7 j/7, mais peut s'écarter légèrement du prix de votre broker (surtout le week-end, quand le marché de l'or est fermé). Vérifiez toujours les niveaux sur votre plateforme avant d'entrer.
+
+En mode « Alertes en direct », les cours publics sont relus toutes les 20 s (1m) ou 45 s (autres UT).
 
 ## Lancer
 

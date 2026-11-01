@@ -68,6 +68,7 @@ button{cursor:pointer}
 
 /* banner */
 .banner{display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-left:3px solid var(--warn);background:var(--warn-soft);border-radius:8px;padding:9px 12px;font-size:13px}
+.banner[hidden]{display:none}
 .banner b{font-weight:600}
 .banner .act{margin-left:auto;display:flex;gap:8px}
 .banner button{border:1px solid var(--line-strong);background:var(--surface);border-radius:6px;padding:4px 10px;font-size:12.5px}
@@ -324,7 +325,7 @@ footer{font-size:11.5px;color:var(--faint);line-height:1.5;max-width:90ch}
   <div class="sec-h"><h2>Journal des signaux</h2><p>Opportunités détectées sur cet appareil.</p><button class="iconbtn" id="feedClear" type="button" style="margin-left:auto">Effacer</button></div>
   <section class="card feed"><ul class="feed-list" id="feed"></ul></section>
 
-  <footer>Alerte Trading est un outil d'aide à la décision. Les signaux sont produits par des règles automatiques (SMC, CRT, Price Action) et peuvent se tromper. Aucun résultat n'est garanti et les performances passées, y compris en backtest, ne préjugent pas des performances futures. Ce n'est pas un conseil en investissement : vérifiez chaque niveau avant d'agir et ne risquez que ce que vous pouvez perdre. Cours fournis par votre connecteur Cubrik ; taille de lot de l'or calculée sur 100 oz par lot standard.</footer>
+  <footer>Alerte Trading est un outil d'aide à la décision. Les signaux sont produits par des règles automatiques (SMC, CRT, Price Action) et peuvent se tromper. Aucun résultat n'est garanti et les performances passées, y compris en backtest, ne préjugent pas des performances futures. Ce n'est pas un conseil en investissement : vérifiez chaque niveau avant d'agir et ne risquez que ce que vous pouvez perdre. Cours fournis par votre connecteur Cubrik dans Claude, sinon par les API publiques Binance / Coinbase (l'or y est suivi via PAXG, jeton adossé à une once d'or, dont le prix peut s'écarter légèrement du XAU/USD spot de votre broker) ; taille de lot de l'or calculée sur 100 oz par lot standard.</footer>
 </div>
 <div class="toast" id="toast" aria-live="polite"></div>
 
@@ -346,7 +347,7 @@ const store={get(k,d){try{const v=localStorage.getItem('at:'+k);return v==null?d
 
 const S={
   symbol:store.get('symbol','XAU/USD'), mode:store.get('mode','scalp'), tf:store.get('tf','5m'), view:'all',
-  data:[], closed:[], source:'demo', analysis:null, marketClosed:false,
+  data:[], closed:[], source:'demo', provider:null, analysis:null, marketClosed:false,
   risk:Object.assign({balance:10000,pct:1,rr:2},store.get('risk',{})),
   live:false, sound:store.get('sound',true), feed:store.get('feed',[]), seen:new Set(store.get('seen',[])),
   loadId:0
@@ -616,7 +617,7 @@ function demoNext(arr,sym,tf){const sec=TF_SEC[tf],cfg=SYMS[sym],last=arr[arr.le
 const mcpP=(window.claude&&typeof window.claude.use==='function')?window.claude.use('mcp').catch(()=>null):Promise.resolve(null);
 const permP=(window.claude&&typeof window.claude.use==='function')?window.claude.use('permissions').catch(()=>null):Promise.resolve(null);
 function parsePayload(p){if(!p||!Array.isArray(p.candles))return null;const out=p.candles.map(x=>({t:Math.floor(Date.parse(x.t)/1000),o:+x.o,h:+x.h,l:+x.l,c:+x.c,v:+x.v||0})).filter(x=>isFinite(x.t)&&isFinite(x.c));out.sort((a,b)=>a.t-b.t);return out.length>=60?out:null;}
-async function fetchCandles(sym,tf,opts){
+async function fetchCubrik(sym,tf,opts){
   const mcp=await mcpP;if(!mcp)return{ok:false,code:'no_mcp'};
   const input={symbol:sym,timeframe:tf,limit:500};
   const once=()=>mcp.callTool(SERVER,'get_candles',input,{cache:{staleTime:(opts&&opts.fresh)?0:20000,gcTime:300000,refresh:!!(opts&&opts.fresh)}});
@@ -625,8 +626,51 @@ async function fetchCandles(sym,tf,opts){
   catch(e){if(e&&e.retryable){await new Promise(res=>setTimeout(res,(e.retryAfterMs||1200)+Math.random()*600));try{r=await once();}catch(e2){return{ok:false,code:e2&&e2.code||'upstream_error',message:e2&&e2.message};}}
     else return{ok:false,code:e&&e.code||'upstream_error',message:e&&e.message};}
   const c=parsePayload(r&&r.payload);if(!c)return{ok:false,code:'bad_payload'};
-  return{ok:true,candles:c,storedAt:r.cache?r.cache.storedAt:null};
+  return{ok:true,candles:c,provider:'cubrik',storedAt:r.cache?r.cache.storedAt:null};
 }
+/* Public market data (no key, CORS enabled) used when the Cubrik connector is not available,
+   e.g. when index.html is opened directly or served by GitHub Pages.
+   Gold is read through PAXG (1 token = 1 troy ounce of gold held in custody), which tracks spot
+   XAU/USD within a few dollars and trades 24/7. */
+const PUB={
+  'XAU/USD':{binance:'PAXGUSDT',coinbase:'PAXG-USD',label:'PAXG (proxy or)'},
+  'BTC/USD':{binance:'BTCUSDT',coinbase:'BTC-USD',label:'BTC'}
+};
+const BN_TF={'1m':'1m','5m':'5m','15m':'15m','1h':'1h','4h':'4h','1D':'1d'};
+const PROVIDER={cubrik:'Cubrik',binance:'Binance',coinbase:'Coinbase'};
+async function getJSON(url,ms){const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),ms||9000);
+  try{const r=await fetch(url,{signal:ctl.signal,cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);return await r.json();}finally{clearTimeout(tm);}}
+async function fetchBinance(sym,tf,n){
+  const hosts=['https://data-api.binance.vision','https://api.binance.com'];let last;
+  for(const h of hosts){try{const j=await getJSON(`${h}/api/v3/klines?symbol=${PUB[sym].binance}&interval=${BN_TF[tf]}&limit=${n}`);
+    if(!Array.isArray(j))throw new Error('format');
+    const out=j.map(k=>({t:Math.floor(k[0]/1000),o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]})).filter(x=>isFinite(x.c));
+    if(out.length>=60)return out;throw new Error('trop peu de bougies');}catch(e){last=e;}}
+  throw last||new Error('binance');
+}
+async function fetchCoinbase(sym,tf,n){
+  // Coinbase has no 4h granularity: build it from 1h candles.
+  const base=tf==='4h'?'1h':tf,g=TF_SEC[base],need=tf==='4h'?Math.min(n*4,1200):n;let end=Math.floor(Date.now()/1000),all=[];
+  while(all.length<need){const start=end-300*g;
+    const j=await getJSON(`https://api.exchange.coinbase.com/products/${PUB[sym].coinbase}/candles?granularity=${g}&start=${new Date(start*1000).toISOString()}&end=${new Date(end*1000).toISOString()}`);
+    if(!Array.isArray(j)||!j.length)break;all=all.concat(j);end=start;}
+  const seen=new Set();let out=all.map(k=>({t:k[0],l:+k[1],h:+k[2],o:+k[3],c:+k[4],v:+k[5]})).filter(x=>isFinite(x.c)&&!seen.has(x.t)&&seen.add(x.t)).sort((a,b)=>a.t-b.t);
+  if(tf==='4h')out=aggregate(out,TF_SEC['4h']).map(x=>({t:x.t,o:x.o,h:x.h,l:x.l,c:x.c,v:0}));
+  out=out.slice(-n);if(out.length<60)throw new Error('trop peu de bougies');return out;
+}
+async function fetchPublic(sym,tf){
+  if(!PUB[sym]||typeof fetch!=='function')return{ok:false,code:'public_failed'};
+  try{return{ok:true,candles:await fetchBinance(sym,tf,500),provider:'binance'};}catch(e){}
+  try{return{ok:true,candles:await fetchCoinbase(sym,tf,500),provider:'coinbase'};}catch(e){}
+  return{ok:false,code:'public_failed'};
+}
+async function fetchCandles(sym,tf,opts){
+  const r=await fetchCubrik(sym,tf,opts);if(r.ok)return r;
+  // A Cubrik problem the user can fix (permission, reconnection…) is still reported in the banner.
+  const p=await fetchPublic(sym,tf);if(p.ok){p.notice=r.code==='no_mcp'||r.code==='not_granted'||r.code==='capability_disabled'||r.code==='capability_removed'?null:r.code;return p;}
+  return r.code==='no_mcp'?p:r;
+}
+function srcLabel(){if(S.source!=='live')return 'données de démonstration';return S.provider==='cubrik'?'cours Cubrik':`cours ${PROVIDER[S.provider]} · ${PUB[S.symbol].label}`;}
 const ERR={
   no_mcp:'Les cours en direct ne sont pas disponibles dans cette vue. Données de démonstration affichées.',
   not_granted:'Les cours en direct ne sont pas disponibles dans cette vue. Données de démonstration affichées.',
@@ -641,7 +685,8 @@ const ERR={
   server_unavailable:'Cubrik ne répond pas pour le moment.',
   upstream_error:'Cubrik n\'a pas pu fournir les cours.',
   tool_error:'Cubrik a refusé la demande de cours pour cet instrument.',
-  bad_payload:'Cubrik a renvoyé trop peu de bougies pour cet instrument.'
+  bad_payload:'Cubrik a renvoyé trop peu de bougies pour cet instrument.',
+  public_failed:'Les cours réels (Cubrik, Binance, Coinbase) sont injoignables depuis ce navigateur. Données de démonstration affichées.'
 };
 
 /* ---------- chart ---------- */
@@ -731,9 +776,9 @@ function setSource(state,txt){$('#srcPill').dataset.state=state;$('#srcTxt').tex
 function showBanner(code,message){
   const b=$('#banner');if(!code){b.hidden=true;b.innerHTML='';return;}
   let txt=ERR[code]||ERR.upstream_error;if(code==='tool_error'&&message)txt+=' ('+String(message).slice(0,140)+')';
-  const acts=[];if(['server_unavailable','upstream_error','approval_required','tool_error','bad_payload','selection_required','needs_reauth','server_not_connected'].includes(code))acts.push(`<button type="button" data-act="retry">${code==='approval_required'?'Autoriser l\'accès':'Réessayer'}</button>`);
+  const acts=[];if(['server_unavailable','upstream_error','approval_required','tool_error','bad_payload','selection_required','needs_reauth','server_not_connected','public_failed'].includes(code))acts.push(`<button type="button" data-act="retry">${code==='approval_required'?'Autoriser l\'accès':'Réessayer'}</button>`);
   if(code==='not_in_manifest')acts.push('<button type="button" data-act="perm">Gérer les autorisations</button>');
-  const demo=S.source==='demo'?' <b>Données de démonstration affichées.</b>':'';
+  const demo=S.source==='demo'?' <b>Données de démonstration affichées.</b>':S.provider!=='cubrik'?` <b>Cours ${PROVIDER[S.provider]} affichés en attendant.</b>`:'';
   b.innerHTML=`<span>${esc(txt)}${txt.indexOf('démonstration')<0?demo:''}</span><span class="act">${acts.join('')}</span>`;b.hidden=false;
 }
 $('#banner').addEventListener('click',async e=>{const a=e.target.closest('button');if(!a)return;if(a.dataset.act==='retry')loadData({fresh:true});if(a.dataset.act==='perm'){const p=await permP;if(p&&p.manage){try{await p.manage();}catch(err){toast('Ouvrez le menu Autorisations de l\'artifact pour autoriser Cubrik.');}loadData({fresh:true});}else toast('Ouvrez le menu Autorisations de l\'artifact pour autoriser Cubrik.');}});
@@ -772,7 +817,7 @@ function renderSignal(){
   const voteHtml=`<div class="votes">${[['smc','SMC'],['crt','CRT'],['pa','PA'],['htf',A.ctx.htf]].map(([k,l])=>`<div class="vote" data-v="${votes[k]}">${l}<b>${arrow(votes[k])}</b></div>`).join('')}</div>`;
   if(!sig){
     el.dataset.dir='0';
-    const st=v==='all'?['smc','crt','pa'].map(k=>`<li><b>${ENG[k]}</b> : ${esc(A[k].status)}</li>`).join(''):`<li>${esc(A[v].status)}</li>`;
+    const st=v==='all'?['smc','crt','pa'].map(k=>`<li><span><b>${ENG[k]}</b> : ${esc(A[k].status)}</span></li>`).join(''):`<li>${esc(A[v].status)}</li>`;
     el.innerHTML=`<div class="sig-top"><span class="dir">ATTENTE</span><span class="sig-meta"><b>${ENG[v]}</b> · ${S.symbol} · ${S.tf}</span></div>
       <div class="empty"><h3>Aucune opportunité valide</h3>Le bot attend que les conditions soient réunies. Il ne force pas de trade.</div>
       ${voteHtml}<ul class="why">${st}</ul>`;
@@ -809,7 +854,7 @@ function renderEngines(){
     el.innerHTML=`<div class="eng-h"><h3>${ENG[k]}</h3><small>${meta[k]}</small><span class="tag" data-v="${e.bias}">${dirTxt(e.bias)}</span></div>
       <div class="status" data-sig="${e.signal?1:0}">${e.signal?(e.signal.dir===1?'▲ ':'▼ '):''}${esc(e.status)}</div>
       <dl class="rows">${e.rows.map(r=>`<div><dt>${esc(r[0])}</dt><dd data-v="${r[2]}">${esc(r[1])}</dd></div>`).join('')}</dl>`;}
-  const last=S.closed[S.closed.length-1];$('#anaStamp').textContent=`Analyse ${ENG[S.view]} · ${S.symbol} ${S.tf} · bougie clôturée ${fmtT(last.t)} · ${S.source==='live'?'cours Cubrik':'données de démonstration'}`;
+  const last=S.closed[S.closed.length-1];$('#anaStamp').textContent=`Analyse ${ENG[S.view]} · ${S.symbol} ${S.tf} · bougie clôturée ${fmtT(last.t)} · ${srcLabel()}`;
 }
 function renderFeed(){
   const ul=$('#feed');if(!S.feed.length){ul.innerHTML='<li class="empty" style="display:block">Aucun signal pour l\'instant. Activez « Alertes en direct » pour être prévenu dès qu\'une opportunité apparaît.</li>';return;}
@@ -835,21 +880,27 @@ function runAnalysis(alert){
   renderHead();renderSignal();renderEngines();drawAnalysis();registerSignal(alert);
 }
 
-let watchUnsub=null,demoTimer=null;
+let watchUnsub=null,demoTimer=null,pollTimer=null;
 async function loadData(opts){
   const id=++S.loadId;opts=opts||{};
   setSource('load','Connexion aux cours…');
   const res=await fetchCandles(S.symbol,S.tf,opts);
   if(id!==S.loadId)return;
-  if(res.ok){S.data=res.candles;S.source='live';setSource('live','Cubrik · cours réels');showBanner(null);}
-  else{if(!S.data.length||S.source!=='demo'||opts.forceDemo!==false){S.data=demoCandles(S.symbol,S.tf);}S.source='demo';setSource('demo','Données de démonstration');showBanner(res.code,res.message);}
+  if(res.ok){S.data=res.candles;S.source='live';S.provider=res.provider;setSource('live',res.provider==='cubrik'?'Cubrik · cours réels':`${PROVIDER[res.provider]} · cours réels${S.symbol==='XAU/USD'?' (PAXG)':''}`);showBanner(res.notice||null);}
+  else{if(!S.data.length||S.source!=='demo'||opts.forceDemo!==false){S.data=demoCandles(S.symbol,S.tf);}S.source='demo';S.provider=null;setSource('demo','Données de démonstration');showBanner(res.code,res.message);}
   setChartData();runAnalysis(!!opts.alert);
   if(chart&&!opts.keepView)chart.timeScale().setVisibleLogicalRange({from:Math.max(0,S.data.length-140),to:S.data.length+6});
   if(S.live)startLive();
 }
 async function startLive(){
   stopLive();
-  if(S.source==='live'){
+  if(S.source==='live'&&S.provider!=='cubrik'){
+    const key=S.symbol+S.tf,every=S.tf==='1m'?20000:45000;
+    pollTimer=setInterval(async()=>{const r=await fetchPublic(S.symbol,S.tf);if(!S.live||key!==S.symbol+S.tf)return;
+      if(!r.ok){setSource('live',`${PROVIDER[S.provider]} · mise à jour retardée`);return;}
+      const c=r.candles,changed=c[c.length-1].t!==S.data[S.data.length-1].t||c[c.length-1].c!==S.data[S.data.length-1].c;
+      S.data=c;S.provider=r.provider;setSource('live',`${PROVIDER[r.provider]} · en direct`);if(changed){setChartData();runAnalysis(true);}},every);
+  } else if(S.source==='live'){
     const mcp=await mcpP;if(!mcp||!S.live)return;
     const key=S.symbol+S.tf;
     watchUnsub=mcp.watchTool(SERVER,'get_candles',{symbol:S.symbol,timeframe:S.tf,limit:500},ev=>{
@@ -864,7 +915,7 @@ async function startLive(){
     demoTimer=setInterval(()=>{S.data.push(demoNext(S.data,S.symbol,S.tf));if(S.data.length>600)S.data.shift();setChartData();runAnalysis(true);},15000);
   }
 }
-function stopLive(){if(watchUnsub){try{watchUnsub();}catch(e){}watchUnsub=null;}if(demoTimer){clearInterval(demoTimer);demoTimer=null;}}
+function stopLive(){if(watchUnsub){try{watchUnsub();}catch(e){}watchUnsub=null;}if(demoTimer){clearInterval(demoTimer);demoTimer=null;}if(pollTimer){clearInterval(pollTimer);pollTimer=null;}}
 
 /* ---------- backtest UI ---------- */
 function renderBT(result,label){
@@ -898,12 +949,12 @@ function btOpts(tf){return{tf,mode:S.mode,rr:S.risk.rr,strat:$('#btStrat').value
 function setBusy(btn,busy,txt){btn.disabled=busy;if(busy){btn.dataset.txt=btn.innerHTML;btn.innerHTML=`<span class="spin"></span>${txt}`;}else if(btn.dataset.txt){btn.innerHTML=btn.dataset.txt;}}
 async function runBacktest(){
   const btn=$('#btRun');setBusy(btn,true,'Calcul…');await new Promise(r=>setTimeout(r,30));
-  try{const c=S.source==='live'?S.closed:S.data;const r=backtest(c,btOpts(S.tf));renderBT({trades:r.trades,start:S.risk.balance},`${ENG[$('#btStrat').value]} · ${S.symbol} ${S.tf} · ${c.length} bougies (${S.source==='live'?'cours Cubrik':'démo'})`);}
+  try{const c=S.source==='live'?S.closed:S.data;const r=backtest(c,btOpts(S.tf));renderBT({trades:r.trades,start:S.risk.balance},`${ENG[$('#btStrat').value]} · ${S.symbol} ${S.tf} · ${c.length} bougies (${srcLabel()})`);}
   finally{setBusy(btn,false);}
 }
 async function runMulti(){
   const btn=$('#btMulti');setBusy(btn,true,'Chargement des UT…');
-  try{let all=[],src=new Set();for(const tf of MODE_TFS[S.mode]){let c;const r=await fetchCandles(S.symbol,tf,{});if(r.ok){c=r.candles;src.add('Cubrik');const sec=TF_SEC[tf];if(c[c.length-1].t+sec>Date.now()/1000)c=c.slice(0,-1);}else{c=demoCandles(S.symbol,tf);src.add('démo');}
+  try{let all=[],src=new Set();for(const tf of MODE_TFS[S.mode]){let c;const r=await fetchCandles(S.symbol,tf,{});if(r.ok){c=r.candles;src.add(PROVIDER[r.provider]);const sec=TF_SEC[tf];if(c[c.length-1].t+sec>Date.now()/1000)c=c.slice(0,-1);}else{c=demoCandles(S.symbol,tf);src.add('démo');}
       await new Promise(res=>setTimeout(res,10));all=all.concat(backtest(c,btOpts(tf)).trades);}
     renderBT({trades:all,start:S.risk.balance},`${ENG[$('#btStrat').value]} · ${S.symbol} · UT ${MODE_TFS[S.mode].join(', ')} (${[...src].join(' + ')})`);}
   finally{setBusy(btn,false);}
@@ -917,7 +968,7 @@ $('#btnAnalyse').addEventListener('click',async()=>{S.view='all';renderControls(
 $$('.actions [data-view]').forEach(b=>b.addEventListener('click',()=>{S.view=b.dataset.view;renderControls();runAnalysis(false);}));
 $('#btnBacktest').addEventListener('click',()=>{$('#btStrat').value=S.view;$('#btAnchor').scrollIntoView({behavior:'smooth',block:'start'});runBacktest();});
 $('#btRun').addEventListener('click',runBacktest);$('#btMulti').addEventListener('click',runMulti);
-$('#liveBtn').addEventListener('click',()=>{S.live=!S.live;renderControls();if(S.live){beep(1);toast(S.source==='live'?'Alertes en direct activées : le bot surveille le marché.':'Alertes en direct activées sur les données de démonstration.');startLive();}else stopLive();});
+$('#liveBtn').addEventListener('click',()=>{S.live=!S.live;renderControls();if(S.live){beep(1);toast(S.source==='live'?`Alertes en direct activées : le bot surveille le marché (${PROVIDER[S.provider]}).`:'Alertes en direct activées sur les données de démonstration.');startLive();}else stopLive();});
 $('#soundBtn').addEventListener('click',()=>{S.sound=!S.sound;store.set('sound',S.sound);renderControls();});
 $('#bal').addEventListener('change',e=>{S.risk.balance=Math.max(100,+e.target.value||10000);store.set('risk',S.risk);renderSignal();});
 $('#riskPct').addEventListener('input',e=>{S.risk.pct=clamp(+e.target.value,1,2);store.set('risk',S.risk);renderControls();renderSignal();});
