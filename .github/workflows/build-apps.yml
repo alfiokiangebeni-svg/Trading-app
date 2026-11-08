@@ -3,7 +3,7 @@ name: Applications (Android + PC)
 on:
   push:
     branches: [main, claude/trading-analysis-app-gold-btc-zdnf42]
-    paths-ignore: ['README.md']
+    paths-ignore: ['README.md', 'bot/**']
   workflow_dispatch:
 
 permissions:

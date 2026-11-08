@@ -1,0 +1,71 @@
+# ===================================================================
+#  SMC / Price Action bot configuration — XAUUSD & BTCUSD
+#  All times are UTC unless stated otherwise (sessions are in New York time).
+# ===================================================================
+
+data:
+  root: data                 # relative to bot/
+  years: 5                   # depth of history to download
+  timeframes: [M5, M15, H1, H4, D1]
+  daily_close_utc_hour: 22   # D1 close = 17:00 New York (FX/metals convention); 0 for BTC
+  assets:
+    XAUUSD:
+      source: dukascopy      # dukascopy (free, real spot XAUUSD) | mt5 | binance_vision (PAXGUSDT proxy) | csv
+      symbol: XAUUSD
+      price_divisor: 1000    # Dukascopy price points -> USD
+      fallback: {source: binance_vision, symbol: PAXGUSDT}
+      daily_close_utc_hour: 22
+    BTCUSD:
+      source: binance_vision # binance_vision (free monthly archives) | ccxt | csv
+      symbol: BTCUSDT
+      daily_close_utc_hour: 0
+
+costs:                       # real costs, applied to every simulated trade
+  XAUUSD:
+    spread: 0.30             # USD/oz, used when the data has no bid/ask spread column
+    use_data_spread: true    # Dukascopy BID+ASK -> real spread minute by minute
+    commission_per_lot: 7.0  # USD round trip per 100 oz lot
+    tick_size: 0.01
+    slippage_ticks_max: 2    # random 0..N ticks per fill
+    contract_size: 100       # oz per lot
+  BTCUSD:
+    spread: 10.0             # USD
+    use_data_spread: false
+    commission_rate: 0.0004  # 0.04 % per side (taker fee on the notional)
+    tick_size: 0.1
+    slippage_ticks_max: 2
+    contract_size: 1
+
+smc:
+  swing_length: 5            # bars each side of a pivot (pivot confirmed L bars later)
+  atr_period: 14
+  displacement_atr: 1.2      # body >= k * ATR = displacement candle (MSS / OB validation)
+  fvg_min_atr: 0.15          # min FVG size as a fraction of ATR
+  equal_level_atr: 0.10      # tolerance for equal highs / lows
+  ob_lookback: 10            # bars searched back from the break for the last opposite candle
+  zone_max_age: 300          # bars after which an untouched zone is dropped
+  ote: [0.62, 0.79]          # optimal trade entry retracement
+
+sessions:                    # New York local time (DST handled automatically)
+  asia:          ["20:00", "00:00"]
+  london:        ["02:00", "05:00"]
+  ny_am:         ["07:00", "10:00"]
+  ny_pm:         ["13:30", "16:00"]
+  silver_bullet: ["10:00", "11:00"]
+
+risk:                        # hard-coded in the engine, cannot be bypassed by a strategy
+  risk_per_trade: 0.01       # 0.5 % - 1 % of equity
+  max_daily_loss: 0.03       # bot stops for the day
+  max_weekly_loss: 0.06      # bot stops for the week
+  max_open_positions: 2
+  breakeven_at_r: 1.0        # move SL to entry at +1R (null to disable)
+  max_hold_bars: 96
+
+split:                       # 60 / 20 / 20 — the final test is locked
+  in_sample: 0.60
+  validation: 0.20
+  test: 0.20
+
+backtest:
+  initial_equity: 10000
+  seed: 42

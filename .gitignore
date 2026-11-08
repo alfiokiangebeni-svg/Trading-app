@@ -3,3 +3,8 @@ www/
 desktop/node_modules/
 desktop/app/
 desktop/dist/
+bot/data/raw/
+bot/data/processed/
+bot/.pytest_cache/
+__pycache__/
+*.pyc

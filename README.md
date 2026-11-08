@@ -4,6 +4,10 @@ Application web d'analyse du marché **Or (XAU/USD)** et **Bitcoin (BTC/USD)**. 
 
 > Outil d'aide à la décision. Aucun résultat n'est garanti et les performances passées, y compris en backtest, ne préjugent pas des performances futures. Ce n'est pas un conseil en investissement.
 
+## Bot de recherche SMC (Python)
+
+Le dossier [`bot/`](bot/README.md) contient le bot de recherche SMC / price action en Python (données 5 ans, détecteurs testés, moteur de backtest avec coûts réels). Voir son README.
+
 ## Fonctionnalités
 
 | Bouton | Ce qu'il fait |
