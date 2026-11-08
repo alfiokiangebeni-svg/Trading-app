@@ -16,6 +16,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Alerte Trading">
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="css/sections.css">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -65,7 +66,7 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
 
 /* header */
 .top{position:sticky;top:0;z-index:9;border-bottom:1px solid var(--line);margin-left:calc(-1*max(16px,env(safe-area-inset-left,0px)));margin-right:calc(-1*max(16px,env(safe-area-inset-right,0px)));padding:env(safe-area-inset-top,0px) max(16px,env(safe-area-inset-right,0px)) 0 max(16px,env(safe-area-inset-left,0px))}
-.top-in{display:flex;align-items:center;gap:10px 12px;flex-wrap:wrap;padding-block:10px;max-width:1480px;margin:0 auto}
+.top-in{display:flex;align-items:center;gap:10px 12px;flex-wrap:wrap;padding-block:10px 0;max-width:1480px;margin:0 auto}
 .brand{display:flex;align-items:center;gap:11px;margin-right:auto;min-width:0}
 .logo{width:38px;height:38px;border-radius:11px;flex:none;display:grid;place-items:center;background:linear-gradient(135deg,#ffd76a,#f2a71b 55%,#c9780a);box-shadow:0 6px 22px -6px rgba(242,167,27,.7),inset 0 1px 0 rgba(255,255,255,.5)}
 .brand h1{font-family:var(--font-display);font-weight:700;font-size:20px;letter-spacing:-.01em;margin:0;line-height:1.05}
@@ -197,7 +198,8 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .sec-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:10px}
 .sec-h h2::before{content:"";display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:9px;background:linear-gradient(135deg,#ffd76a,#f2a71b);box-shadow:0 0 10px rgba(242,193,78,.7);vertical-align:2px}
 .sec-h p{margin:0;color:var(--muted);font-size:12.5px}
-.engines{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.engines{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.check{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);padding-bottom:9px}.check input{accent-color:var(--accent)}
 .eng{padding:18px;display:grid;gap:12px;align-content:start;transition:border-color .2s,box-shadow .2s}
 .eng[data-active="true"]{border-color:rgba(242,193,78,.45);box-shadow:var(--shadow),0 0 0 1px rgba(242,193,78,.18)}
 .eng-h{display:flex;align-items:center;gap:8px}
@@ -310,11 +312,16 @@ footer{font-size:11.5px;color:var(--faint);line-height:1.6;max-width:100ch}
       <button class="switch" id="liveBtn" aria-pressed="false" type="button"><i></i><span>Alertes<span class="lbl-long"> en direct</span></span></button>
       <button class="iconbtn" id="soundBtn" type="button" aria-pressed="true">Son : activé</button>
       <button class="iconbtn" id="themeBtn" type="button" aria-label="Changer de thème" title="Thème clair / sombre"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 1.7a6.3 6.3 0 010 12.6z" fill="currentColor"/></svg></button>
+      <nav class="topnav" aria-label="Sections">
+        <a href="#trading" data-go="trading">Trading</a><a href="#news" data-go="news">Annonces</a><a href="#foot" data-go="foot">Football</a><a href="#academy" data-go="academy">Académie</a><a href="#lab" data-go="lab">Labo</a>
+      </nav>
       <button class="iconbtn gold" id="installBtn" type="button" hidden><svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1v8M3.5 5.5L7 9l3.5-3.5M2 12h10" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>Installer</button>
     </div>
   </header>
 
+  <div class="view" id="view-trading">
   <div class="banner" id="banner" hidden></div>
+  <div class="newswarn" id="newsWarn" hidden></div>
 
   <section class="controls" aria-label="Réglages du marché">
     <div class="ctl"><span class="lbl">Marché</span>
@@ -337,6 +344,7 @@ footer{font-size:11.5px;color:var(--faint);line-height:1.6;max-width:100ch}
       <button class="btn" data-view="smc" type="button">Analyse SMC</button>
       <button class="btn" data-view="crt" type="button">Analyse CRT</button>
       <button class="btn" data-view="pa" type="button">Price Action</button>
+      <button class="btn" data-view="v2" type="button">Bot SMC v2</button>
       <button class="btn" id="btnBacktest" type="button"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M1 12h12M2 10l3-4 3 2 4-6" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>Backtest</button>
     </div>
   </section>
@@ -385,15 +393,17 @@ footer{font-size:11.5px;color:var(--faint);line-height:1.6;max-width:100ch}
     <article class="card eng" id="eng-smc"></article>
     <article class="card eng" id="eng-crt"></article>
     <article class="card eng" id="eng-pa"></article>
+    <article class="card eng" id="eng-v2"></article>
   </section>
 
   <div class="sec-h" id="btAnchor"><h2>Backtest</h2><p>Rejoue la stratégie bougie par bougie sur l'historique chargé, sans regarder le futur.</p></div>
   <section class="card bt">
     <div class="bt-ctl">
       <div class="field"><label for="btStrat">Stratégie</label>
-        <select id="btStrat"><option value="all">Confluence (toutes)</option><option value="smc">SMC</option><option value="crt">CRT</option><option value="pa">Price Action</option></select></div>
+        <select id="btStrat"><option value="all">Confluence (toutes)</option><option value="smc">SMC</option><option value="crt">CRT</option><option value="pa">Price Action</option><option value="v2">Bot SMC v2 (Python)</option></select></div>
       <div class="field"><label for="btSpread">Spread / frais (USD)</label><input type="number" id="btSpread" min="0" step="0.05" value="0.35"></div>
       <div class="field"><label for="btHold">Durée max (bougies)</label><input type="number" id="btHold" min="5" step="5" value="60"></div>
+      <label class="check"><input type="checkbox" id="btBE" checked> Break-even à +1R</label>
       <button class="btn primary" id="btRun" type="button">Lancer le backtest</button>
       <button class="btn" id="btMulti" type="button">Tester toutes les UT du style</button>
     </div>
@@ -402,7 +412,7 @@ footer{font-size:11.5px;color:var(--faint);line-height:1.6;max-width:100ch}
       <div class="eq"><canvas id="eqCanvas"></canvas></div>
       <div class="tbl-wrap"><table id="btTable"><thead><tr><th>Date</th><th>UT</th><th>Sens</th><th>Moteur</th><th>Entrée</th><th>Sortie</th><th>R</th></tr></thead><tbody></tbody></table></div>
     </div>
-    <p class="note" id="btNote">Hypothèses : entrée à l'ouverture de la bougie suivant le signal, une position à la fois, stop prioritaire si stop et objectif sont touchés dans la même bougie, risque composé au pourcentage choisi, spread déduit à chaque trade.</p>
+    <p class="note" id="btNote">Hypothèses (identiques au bot Python) : entrée à l'ouverture de la bougie suivante, une position à la fois, stop prioritaire si stop et objectif sont dans la même bougie, spread + commission déduits (or 7 $/lot, BTC 0,04 % par côté), break-even à +1R, plafonds de perte −3 %/jour et −6 %/semaine.</p>
   </section>
 
   <div class="sec-h" id="feedSec"><h2>Journal des signaux</h2><p>Opportunités détectées sur cet appareil.</p><button class="iconbtn" id="feedClear" type="button" style="margin-left:auto">Effacer</button></div>
@@ -416,14 +426,20 @@ footer{font-size:11.5px;color:var(--faint);line-height:1.6;max-width:100ch}
   </section>
 
   <footer>Alerte Trading est un outil d'aide à la décision. Les signaux sont produits par des règles automatiques (SMC, CRT, Price Action) et peuvent se tromper. Aucun résultat n'est garanti et les performances passées, y compris en backtest, ne préjugent pas des performances futures. Ce n'est pas un conseil en investissement : vérifiez chaque niveau avant d'agir et ne risquez que ce que vous pouvez perdre. Cours fournis par votre connecteur Cubrik dans Claude, sinon par les API publiques Binance / Coinbase (l'or y est suivi via PAXG, jeton adossé à une once d'or, dont le prix peut s'écarter légèrement du XAU/USD spot de votre broker) ; taille de lot de l'or calculée sur 100 oz par lot standard.</footer>
+  </div>
+  <section class="view" id="view-news" hidden></section>
+  <section class="view" id="view-foot" hidden></section>
+  <section class="view" id="view-academy" hidden></section>
+  <section class="view" id="view-lab" hidden></section>
 </div>
 <div class="toast" id="toast" aria-live="polite"></div>
-<nav class="tabbar" id="tabbar" aria-label="Navigation">
-  <a href="#chartSec" aria-current="true"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>Graphique</a>
-  <a href="#sigCard"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 00-6 6v4l-2 3h16l-2-3V9a6 6 0 00-6-6zM10 19a2 2 0 004 0" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linejoin="round"/></svg>Signal</a>
-  <a href="#engSec"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Analyse</a>
-  <a href="#btAnchor"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18M6 16v-5M11 16V7M16 16v-8M21 16v-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Backtest</a>
-  <a href="#feedSec"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Journal</a>
+<div class="viewer" id="viewer" hidden><div class="viewer-bar"><b id="viewerTitle"></b><button class="iconbtn" type="button" id="viewerClose">Fermer ✕</button></div><iframe id="viewerFrame" title="Rapport"></iframe></div>
+<nav class="tabbar" id="tabbar" aria-label="Sections">
+  <a href="#trading" data-go="trading"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>Trading</a>
+  <a href="#news" data-go="news"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M3.5 10h17M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Annonces</a>
+  <a href="#foot" data-go="foot"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M12 7.5l3.8 2.8-1.4 4.4H9.6L8.2 10.3zM12 3v4.5M20.6 9.7l-4.8.6M17.3 19.4l-2.9-4.7M6.7 19.4l2.9-4.7M3.4 9.7l4.8.6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/></svg>Football</a>
+  <a href="#academy" data-go="academy"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 9L12 4.5 21.5 9 12 13.5z M6.5 11v5c2.5 2.3 8.5 2.3 11 0v-5M21.5 9v6" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linejoin="round" stroke-linecap="round"/></svg>Académie</a>
+  <a href="#lab" data-go="lab"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6l-5.5 9.5A1.6 1.6 0 006 21h12a1.6 1.6 0 001.5-2.5L14 9V3M7.5 15h9" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linejoin="round" stroke-linecap="round"/></svg>Labo</a>
 </nav>
 
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
@@ -434,8 +450,8 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const TF_SEC={'1m':60,'5m':300,'15m':900,'1h':3600,'4h':14400,'1D':86400};
 const HTF_OF={'1m':'15m','5m':'1h','15m':'4h','1h':'1D','4h':'1D'};
 const MODE_TFS={scalp:['1m','5m','15m'],day:['15m','1h','4h']};
-const SYMS={'XAU/USD':{name:'Or',dec:2,spread:0.35,base:4000,vol:0.012},'BTC/USD':{name:'Bitcoin',dec:1,spread:15,base:78000,vol:0.026}};
-const ENG={smc:'SMC',crt:'CRT',pa:'Price Action',all:'Confluence'};
+const SYMS={'XAU/USD':{name:'Or',dec:2,spread:0.35,base:4000,vol:0.012,commUnit:0.07,commRate:0},'BTC/USD':{name:'Bitcoin',dec:1,spread:15,base:78000,vol:0.026,commUnit:0,commRate:0.0004}};
+const ENG={smc:'SMC',crt:'CRT',pa:'Price Action',v2:'Bot SMC v2',all:'Confluence'};
 const SERVER='Cubrik';
 const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 const esc=s=>String(s).replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
@@ -659,13 +675,76 @@ function analyzePA(c,ctx){
   return{bias:trend,signal,status,rows,draw:{zones:[],markers,lines,ema:true}};
 }
 
+/* ---------- Bot SMC v2 : port JS de la stratégie du bot Python (bot/smcbot/strategies/simple_smc.py) ----------
+   biais = structure de l'UT supérieure (bougies clôturées) ; zone = premier contact d'un FVG / OB frais dans le sens du biais,
+   en discount (achat) ou premium (vente), pendant la kill zone Londres ou New York AM (heure de New York) ;
+   confirmation = première bougie qui clôture dans le sens du trade dans les 3 bougies, zone intacte ;
+   stop au-delà de la zone + 0,2 ATR (risque entre 0,3 et 3 ATR), objectif = R:R choisi. */
+const NYF=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+const nyCache=new Map();
+function nyMinutes(t){let v=nyCache.get(t);if(v!=null)return v;const p=NYF.formatToParts(new Date(t*1000));v=(+p.find(x=>x.type==='hour').value%24)*60+(+p.find(x=>x.type==='minute').value);if(nyCache.size>20000)nyCache.clear();nyCache.set(t,v);return v;}
+function killZone(t){const m=nyMinutes(t);if(m>=120&&m<300)return 'Londres';if(m>=420&&m<600)return 'New York AM';if(m>=600&&m<660)return 'Silver Bullet';if(m>=810&&m<960)return 'New York PM';if(m>=1200)return 'Asie';return null;}
+function analyzeV2(c,ctx){
+  const n=c.length,a=ctx.atr,last=c[n-1],px=last.c,hsec=TF_SEC[ctx.htf],lsec=TF_SEC[ctx.tf],K=3;
+  let H=aggregate(c,hsec);if(H.length&&last.t+lsec<H[H.length-1].t+hsec)H=H.slice(0,-1);
+  const bias=H.length>=12?marketStructure(H,findSwings(H,2)).trend:0;
+  const st=marketStructure(c,ctx.sw);
+  const zones=orderBlocks(c,st.events).map(o=>({type:'OB',dir:o.dir,top:o.top,bot:o.bot,created:o.created,t:o.t}))
+    .concat(fairValueGaps(c,a).map(g=>({type:'FVG',dir:g.dir,top:g.top,bot:g.bot,created:g.created,t:g.t})));
+  let best=null,fresh=[],waiting=null;
+  for(const z of zones){
+    if(n-1-z.created>300)continue;
+    let tap=-1,dead=false;
+    for(let j=z.created+1;j<n;j++){const touched=z.dir===1?c[j].l<=z.top:c[j].h>=z.bot;if(touched){tap=j;dead=z.dir===1?c[j].c<z.bot:c[j].c>z.top;break;}}
+    if(tap<0){if(z.dir===bias)fresh.push(z);continue;}
+    if(dead||z.dir!==bias||tap<n-1-K)continue;
+    let holds=true,conf=-1;
+    for(let j=tap;j<n;j++){if(z.dir===1?c[j].c<z.bot:c[j].c>z.top){holds=false;break;}if(conf<0&&(z.dir===1?c[j].c>c[j].o:c[j].c<c[j].o))conf=j;}
+    if(!holds)continue;
+    const kz=killZone(c[tap].t);if(kz!=='Londres'&&kz!=='New York AM')continue;
+    let Hh=null,Ll=null;for(const s of ctx.sw.hs)if(s.conf<=tap)Hh=s.p;for(const s of ctx.sw.ls)if(s.conf<=tap)Ll=s.p;
+    if(Hh==null||Ll==null||Hh<=Ll)continue;
+    const pos=(c[tap].c-Ll)/(Hh-Ll);if(z.dir===1?pos>=0.5:pos<=0.5)continue;
+    if(conf===n-1){if(!best||z.created>best.z.created)best={z,tap,kz,pos};}
+    else if(conf<0&&(!waiting||z.created>waiting.z.created))waiting={z,tap,kz,pos};
+  }
+  let signal=null,status;
+  if(!bias)status=`Pas de biais clair en ${ctx.htf} : le bot v2 attend`;
+  else if(best){
+    const z=best.z,d=z.dir,sl=d===1?z.bot-0.2*a[n-1]:z.top+0.2*a[n-1],risk=(px-sl)*d;
+    if(risk>=0.3*a[n-1]&&risk<=3*a[n-1]){
+      let conf=58+(z.type==='OB'?4:0)+(Math.abs(best.pos-0.5)>0.25?6:0);
+      signal={engine:'v2',dir:d,entry:px,sl,tp:px+d*ctx.rr*risk,tp2:null,conf:clamp(conf,30,85),key:`v2:${z.type}:${z.t}:${d}`,t:last.t,
+        why:[`Biais ${ctx.htf} ${d===1?'haussier':'baissier'} (structure, bougies clôturées)`,`Premier contact d'un ${z.type} frais ${fp(z.bot)} – ${fp(z.top)}`,
+             `Contact pendant la kill zone ${best.kz} (heure de New York)`,`Prix en ${d===1?'discount':'premium'} (${Math.round(best.pos*100)} % du range)`,
+             'Bougie de confirmation clôturée dans le sens du trade, zone intacte','Règles du bot de recherche Python (stratégie simple_smc)']};
+      status=`Setup ${d===1?'achat':'vente'} validé sur ${z.type} ${fp(z.bot)} – ${fp(z.top)}`;
+    } else status='Setup trouvé mais stop hors de la plage 0,3 – 3 ATR';
+  } else if(waiting)status=`${waiting.z.type} touché en ${waiting.kz} : attendre la bougie de confirmation`;
+  else{const near=fresh.filter(z=>bias===1?z.top<px:z.bot>px).sort((x,y)=>bias===1?y.top-x.top:x.bot-y.bot)[0];
+    status=near?`Attendre un retour sur ${near.type} ${fp(near.bot)} – ${fp(near.top)} en kill zone`:`Biais ${bias===1?'haussier':'baissier'} : pas de zone fraîche`;}
+  const kzNow=killZone(last.t+lsec);
+  let Hn=st.lastH?st.lastH.p:null,Ln=st.lastL?st.lastL.p:null;const posNow=(Hn!=null&&Ln!=null&&Hn>Ln)?(px-Ln)/(Hn-Ln):null;
+  const rows=[
+    [`Biais ${ctx.htf}`,dirTxt(bias),bias],
+    ['Kill zone en cours',kzNow||'Hors session',kzNow==='Londres'||kzNow==='New York AM'?1:0],
+    ['Zones fraîches (sens du biais)',String(fresh.length),0],
+    ['Premium / discount',posNow==null?'—':`${posNow<0.5?'Discount':'Premium'} · ${Math.round(clamp(posNow,0,1)*100)} %`,posNow==null?0:(posNow<0.5?1:-1)],
+    ['Confirmation','3 bougies max après contact',0],
+    ['Stop / objectif',`zone + 0,2 ATR · R:R 1:${fmt(ctx.rr,1)}`,0]
+  ];
+  const dz=fresh.slice(-6).map(z=>({t0:z.t,top:z.top,bot:z.bot,kind:z.type==='FVG'?'fvg':(z.dir===1?'bull':'bear'),label:z.type+' frais'}));
+  const markers=[];const src=best||waiting;if(src)markers.push({time:c[src.tap].t,position:src.z.dir===1?'belowBar':'aboveBar',shape:'circle',color:'accent',text:'Contact '+src.z.type});
+  return{bias,signal,status,rows,draw:{zones:dz,markers,lines:[]}};
+}
+
 /* ---------- orchestration ---------- */
 function htfBiasOf(c,htf){const H=aggregate(c,TF_SEC[htf]);if(H.length<10)return 0;const cl=H.map(x=>x.c);const e=emaArr(cl,8);const m=cl.length-1;if(cl[m]>e[m]&&e[m]>e[m-2])return 1;if(cl[m]<e[m]&&e[m]<e[m-2])return -1;return 0;}
 function analyzeAll(c,o){
   const L=o.mode==='scalp'?2:3;const closes=c.map(x=>x.c);
   const ctx={tf:o.tf,htf:HTF_OF[o.tf],rr:o.rr,atr:atrArr(c),sw:findSwings(c,L),ema20:emaArr(closes,20),ema50:emaArr(closes,50)};
   ctx.htfBias=htfBiasOf(c,ctx.htf);
-  const smc=analyzeSMC(c,ctx),crt=analyzeCRT(c,ctx),pa=analyzePA(c,ctx);
+  const smc=analyzeSMC(c,ctx),crt=analyzeCRT(c,ctx),pa=analyzePA(c,ctx),v2=analyzeV2(c,ctx);
   const votes={smc:smc.bias,crt:crt.bias,pa:pa.bias,htf:ctx.htfBias};const vv=Object.values(votes);
   let best=null;
   for(const s of [smc.signal,crt.signal,pa.signal]){if(!s)continue;const agree=vv.filter(v=>v===s.dir).length,opp=vv.filter(v=>v===-s.dir).length,score=agree-opp;
@@ -673,24 +752,32 @@ function analyzeAll(c,o){
   let confluence=null;
   if(best){const names=Object.entries(votes).filter(([k,v])=>v===best.sig.dir).map(([k])=>k==='htf'?ctx.htf:ENG[k]);
     confluence=Object.assign({},best.sig,{engine:'all',origin:best.sig.engine,conf:clamp(best.sig.conf+(best.agree-2)*7,30,92),agree:best.agree,key:'all:'+best.sig.key,why:[`Confluence ${best.agree}/4 : ${names.join(', ')}`].concat(best.sig.why)});}
-  return{ctx,smc,crt,pa,votes,confluence};
+  return{ctx,smc,crt,pa,v2,votes,confluence};
 }
 function pickSignal(A,strat){return strat==='all'?A.confluence:A[strat].signal;}
 
 /* ---------- backtest ---------- */
 function backtest(c,o){
-  const trades=[],used=new Set(),warm=100,win=250;let open=null;let eq=o.balance;const curve=[{t:c[Math.min(warm,c.length-1)].t,eq}];
+  // règles reprises du moteur Python : coûts réels (spread + commission), stop prioritaire, break-even à +1R,
+  // pas de nouveau trade si son stop pouvait faire dépasser -3 % sur la journée ou -6 % sur la semaine
+  const trades=[],used=new Set(),warm=100,win=250,cfg=SYMS[o.sym||S.symbol];let open=null;let eq=o.balance;const curve=[{t:c[Math.min(warm,c.length-1)].t,eq}];
+  let dayKey=null,dayStart=eq,weekKey=null,weekStart=eq,blocked=0;
+  const cost=(en,ex)=>o.spread+cfg.commUnit+cfg.commRate*(en+ex);
   for(let i=warm;i<c.length;i++){
+    const dk=Math.floor(c[i].t/86400),wk=Math.floor((dk+3)/7);
+    if(dk!==dayKey){dayKey=dk;dayStart=eq;}if(wk!==weekKey){weekKey=wk;weekStart=eq;}
     if(open){const bar=c[i],d=open.dir;const hitSL=d===1?bar.l<=open.sl:bar.h>=open.sl;const hitTP=d===1?bar.h>=open.tp:bar.l<=open.tp;
-      let exit=null,why='';if(hitSL){exit=open.sl;why='Stop';}else if(hitTP){exit=open.tp;why='Objectif';}else if(i-open.i0>=o.hold||i===c.length-1){exit=bar.c;why=i===c.length-1?'Fin des données':'Durée max';}
-      if(exit!=null){const R=(exit-open.entry)*d/open.risk-o.spread/open.risk;const pnl=eq*o.pct/100*R;eq+=pnl;trades.push(Object.assign({},open,{exit,R,pnl,why,tExit:bar.t,tf:o.tf}));curve.push({t:bar.t,eq});open=null;}
+      let exit=null,why='';if(hitSL){exit=d===1?Math.min(open.sl,bar.o):Math.max(open.sl,bar.o);why=open.be?'Break-even':'Stop';}else if(hitTP){exit=open.tp;why='Objectif';}else if(i-open.i0>=o.hold||i===c.length-1){exit=bar.c;why=i===c.length-1?'Fin des données':'Durée max';}
+      if(exit!=null){const R=(exit-open.entry)*d/open.risk-cost(open.entry,exit)/open.risk;const pnl=eq*o.pct/100*R;eq+=pnl;trades.push(Object.assign({},open,{exit,R,pnl,why,tExit:bar.t,tf:o.tf}));curve.push({t:bar.t,eq});open=null;}
+      else if(o.be&&!open.be&&(d===1?bar.h>=open.entry+open.risk:bar.l<=open.entry-open.risk)){open.sl=open.entry;open.be=true;}
       continue;}
     if(i>=c.length-1)break;
     const A=analyzeAll(c.slice(Math.max(0,i-win+1),i+1),o);const s=pickSignal(A,o.strat);
-    if(s&&!used.has(s.key)){used.add(s.key);const entry=c[i+1].o,d=s.dir;
-      if((entry-s.sl)*d>0&&(s.tp-entry)*d>0){open={dir:d,entry,sl:s.sl,tp:s.tp,risk:Math.abs(entry-s.sl),i0:i+1,t:c[i+1].t,engine:s.origin||s.engine};}}
+    if(s&&!used.has(s.key)){used.add(s.key);const entry=c[i+1].o,d=s.dir,next=eq*o.pct/100;
+      if((dayStart-eq)+next>dayStart*0.03+1e-9||(weekStart-eq)+next>weekStart*0.06+1e-9){blocked++;continue;}
+      if((entry-s.sl)*d>0&&(s.tp-entry)*d>0){open={dir:d,entry,sl:s.sl,tp:s.tp,risk:Math.abs(entry-s.sl),i0:i+1,t:c[i+1].t,engine:s.origin||s.engine,be:false};}}
   }
-  return{trades,curve,end:eq};
+  return{trades,curve,end:eq,blocked};
 }
 function stats(trades,start){
   const n=trades.length,wins=trades.filter(t=>t.R>0),loss=trades.filter(t=>t.R<=0);
@@ -909,7 +996,13 @@ function liveAdjust(sig){
   return Object.assign({},sig,{entry:px,rr});
 }
 function currentSignal(){if(!S.analysis)return null;return liveAdjust(pickSignal(S.analysis,S.view));}
+function updateNewsWarn(){
+  const el=$('#newsWarn');if(!el)return;const cal=window.ATCal;const ev=cal&&cal.near?cal.near(30):[];
+  if(!ev.length){el.hidden=true;return;}
+  const e=ev[0];el.innerHTML=`<b>Annonce ${esc(e.country)} à fort impact ${esc(cal.countdown(e.time))}</b> : ${esc(e.title)}. Règle du bot : pas de nouvelle entrée 30 min avant et après. <a href="#news">Voir les annonces</a>`;el.hidden=false;
+}
 function renderSignal(){
+  updateNewsWarn();
   const A=S.analysis,el=$('#sigCard');if(!A){el.innerHTML='<div class="empty"><span class="spin"></span> Analyse en cours…</div>';return;}
   const sig=currentSignal(),v=S.view,votes=A.votes;
   const voteHtml=`<div class="votes">${[['smc','SMC'],['crt','CRT'],['pa','PA'],['htf',A.ctx.htf]].map(([k,l])=>`<div class="vote" data-v="${votes[k]}">${l}<b>${arrow(votes[k])}</b></div>`).join('')}</div>`;
@@ -947,8 +1040,8 @@ function renderSignal(){
 }
 function renderEngines(){
   const A=S.analysis;if(!A)return;
-  const meta={smc:'Smart Money Concepts',crt:'Candle Range Theory',pa:'Price Action'};
-  for(const k of ['smc','crt','pa']){const e=A[k],el=$('#eng-'+k);el.dataset.active=String(S.view===k||S.view==='all');
+  const meta={smc:'Smart Money Concepts',crt:'Candle Range Theory',pa:'Price Action',v2:'Bot Python'};
+  for(const k of ['smc','crt','pa','v2']){const e=A[k],el=$('#eng-'+k);el.dataset.active=String(S.view===k||(S.view==='all'&&k!=='v2'));
     el.innerHTML=`<div class="eng-h"><h3>${ENG[k]}</h3><small>${meta[k]}</small><span class="tag" data-v="${e.bias}">${dirTxt(e.bias)}</span></div>
       <div class="status" data-sig="${e.signal?1:0}">${e.signal?(e.signal.dir===1?'▲ ':'▼ '):''}${esc(e.status)}</div>
       <dl class="rows">${e.rows.map(r=>`<div><dt>${esc(r[0])}</dt><dd data-v="${r[2]}">${esc(r[1])}</dd></div>`).join('')}</dl>`;}
@@ -1022,7 +1115,7 @@ function renderBT(result,label){
   $('#btStats').innerHTML=tiles.map(([k,v],i)=>`<div class="stat"><span>${k}</span><b class="${i===3&&st.n?(net>=0?'up':'down'):''}">${v}</b></div>`).join('');
   const rows=trades.slice().sort((a,b)=>b.t-a.t).slice(0,60).map(t=>`<tr><td>${fmtT(t.t)}</td><td>${t.tf}</td><td class="${t.dir===1?'up':'down'}">${t.dir===1?'Achat':'Vente'}</td><td>${ENG[t.engine]||t.engine}</td><td>${fp(t.entry)}</td><td>${fp(t.exit)}</td><td class="${t.R>0?'up':'down'}">${t.R>0?'+':''}${fmt(t.R,2)}</td></tr>`).join('');
   $('#btTable tbody').innerHTML=rows||'<tr><td colspan="7" style="text-align:left;font-family:var(--font-body)">Aucun trade : la stratégie n\'a trouvé aucune configuration valide sur cet historique.</td></tr>';
-  $('#btNote').textContent=`${label} · capital ${fmt(start,0)} $ · risque ${fmt(S.risk.pct,2).replace(/,?0+$/,'')} % par trade · R:R visé 1:${fmt(S.risk.rr,1)}. Entrée à l'ouverture de la bougie suivant le signal, une position à la fois, stop prioritaire si stop et objectif sont touchés dans la même bougie, spread déduit. Historique court (500 bougies par UT) : les chiffres varient fortement d'une période à l'autre.`;
+  $('#btNote').textContent=`${label} · capital ${fmt(start,0)} $ · risque ${fmt(S.risk.pct,2).replace(/,?0+$/,'')} % par trade · R:R visé 1:${fmt(S.risk.rr,1)}. Règles du moteur Python : entrée à l'ouverture de la bougie suivante, stop prioritaire, spread + commission déduits, break-even à +1R ${$('#btBE').checked?'activé':'désactivé'}, plafonds −3 %/jour et −6 %/semaine. Historique court (500 bougies par UT) : les chiffres varient fortement d'une période à l'autre.`;
   drawEquity(eqr.curve,start);
 }
 function drawEquity(curve,start){
@@ -1043,7 +1136,7 @@ function drawEquity(curve,start){
   const lx=X(curve.length-1),ly=Y(curve[curve.length-1].eq);g.fillStyle=col;g.beginPath();g.arc(lx,ly,4,0,Math.PI*2);g.fill();
   g.fillStyle=css('muted');g.fillText(`Trades : ${curve.length-1}`,pl,H-6);
 }
-function btOpts(tf){return{tf,mode:S.mode,rr:S.risk.rr,strat:$('#btStrat').value,spread:Math.max(0,+$('#btSpread').value||0),hold:Math.max(5,+$('#btHold').value||60),balance:S.risk.balance,pct:S.risk.pct};}
+function btOpts(tf){return{tf,sym:S.symbol,be:$('#btBE').checked,mode:S.mode,rr:S.risk.rr,strat:$('#btStrat').value,spread:Math.max(0,+$('#btSpread').value||0),hold:Math.max(5,+$('#btHold').value||60),balance:S.risk.balance,pct:S.risk.pct};}
 function setBusy(btn,busy,txt){btn.disabled=busy;if(busy){btn.dataset.txt=btn.innerHTML;btn.innerHTML=`<span class="spin"></span>${txt}`;}else if(btn.dataset.txt){btn.innerHTML=btn.dataset.txt;}}
 async function runBacktest(){
   const btn=$('#btRun');setBusy(btn,true,'Calcul…');await new Promise(r=>setTimeout(r,30));
@@ -1095,11 +1188,43 @@ let installEvt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;$('#installBtn').hidden=false;});
 window.addEventListener('appinstalled',()=>{$('#installBtn').hidden=true;toast('Alerte Trading est installée.');});
 $('#installBtn').addEventListener('click',async()=>{if(!installEvt)return;installEvt.prompt();try{await installEvt.userChoice;}catch(e){}installEvt=null;$('#installBtn').hidden=true;});
-const tabs=$$('#tabbar a');
-if('IntersectionObserver' in window){const io=new IntersectionObserver(es=>{for(const en of es){if(en.isIntersecting){const id='#'+en.target.id;tabs.forEach(a=>a.setAttribute('aria-current',a.getAttribute('href')===id));}}},{rootMargin:'-45% 0px -50% 0px'});
-  tabs.forEach(a=>{const t=$(a.getAttribute('href'));if(t)io.observe(t);});}
 const isNative=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform())||/Electron/.test(navigator.userAgent);
 if(isNative){const a=$('#appsSec');if(a){a.hidden=true;a.nextElementSibling.hidden=true;}}
+
+/* ---------- visionneuse de rapports ---------- */
+document.addEventListener('click',e=>{const a=e.target.closest('a[href^="bot/reports/"]');if(!a)return;e.preventDefault();
+  $('#viewerTitle').textContent=a.textContent.replace('→','').trim();$('#viewerFrame').src=a.getAttribute('href');$('#viewer').hidden=false;});
+$('#viewerClose').addEventListener('click',()=>{$('#viewer').hidden=true;$('#viewerFrame').src='about:blank';});
+
+/* ---------- sections (Trading, Annonces, Football, Académie, Labo) ---------- */
+const VIEWS=['trading','news','foot','academy','lab'];
+function go(v){
+  if(!VIEWS.includes(v))v='trading';
+  document.body.dataset.view=v;
+  for(const x of VIEWS){const el=$('#view-'+x);if(el)el.hidden=x!==v;}
+  $$('[data-go]').forEach(a=>a.setAttribute('aria-current',String(a.dataset.go===v)));
+  window.dispatchEvent(new CustomEvent('at:view',{detail:v}));
+  if(v==='trading')requestAnimationFrame(()=>{drawOverlay();drawEquityLast();});
+  window.scrollTo(0,0);
+}
+window.addEventListener('hashchange',()=>go(location.hash.slice(1)));
+/* bridge used by js/*.js */
+window.AT={
+  go:v=>{if(location.hash.slice(1)===v)go(v);else location.hash=v;},
+  toast, fmt, esc, store, killZone, nyMinutes,
+  openMarket(o){o=o||{};if(o.sym&&SYMS[o.sym])S.symbol=o.sym;if(o.mode&&MODE_TFS[o.mode])S.mode=o.mode;
+    if(!MODE_TFS[S.mode].includes(S.tf))S.tf=MODE_TFS[S.mode][1];if(o.tf&&MODE_TFS[S.mode].includes(o.tf))S.tf=o.tf;
+    if(o.view&&ENG[o.view])S.view=o.view;store.set('symbol',S.symbol);store.set('mode',S.mode);store.set('tf',S.tf);S.data=[];S.analysis=null;renderControls();themeChart();
+    if(!o.stay)window.AT.go('trading');
+    loadData().then(()=>{if(o.done)o.done();if(o.scroll){const t=$(o.scroll);if(t)t.scrollIntoView({behavior:'smooth',block:'start'});}if(o.backtest){$('#btStrat').value=o.view||'all';runBacktest();}});},
+  snapshot(){const A=S.analysis;if(!A)return null;const last=S.closed[S.closed.length-1];
+    return{symbol:S.symbol,tf:S.tf,htf:A.ctx.htf,mode:S.mode,price:last?last.c:null,t:last?last.t:null,source:srcLabel(),votes:A.votes,
+      v2:{bias:A.v2.bias,status:A.v2.status,rows:A.v2.rows,signal:A.v2.signal},smc:{bias:A.smc.bias,status:A.smc.status,rows:A.smc.rows},
+      pa:{bias:A.pa.bias,status:A.pa.status,rows:A.pa.rows},crt:{bias:A.crt.bias,status:A.crt.status},signal:currentSignal(),risk:Object.assign({},S.risk),
+      kz:last?killZone(last.t+TF_SEC[S.tf]):null};},
+  sizing:(e,sl)=>sizing(e,sl), symbols:SYMS, refreshSignal:()=>{if(S.analysis)renderSignal();}
+};
+go(location.hash.slice(1)||'trading');
 if('serviceWorker' in navigator&&!isNative&&/^https?:$/.test(location.protocol)&&!window.claude){navigator.serviceWorker.register('sw.js').catch(()=>{});}
 
 /* ---------- boot ---------- */
@@ -1111,5 +1236,10 @@ loadData();
 })();
 </script>
 
+<script src="js/calendar.js" defer></script>
+<script src="js/football.js" defer></script>
+<script src="js/academy-content.js" defer></script>
+<script src="js/academy.js" defer></script>
+<script src="js/lab.js" defer></script>
 </body>
 </html>

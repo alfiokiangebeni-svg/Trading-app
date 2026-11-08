@@ -4,6 +4,18 @@ Application web d'analyse du marché **Or (XAU/USD)** et **Bitcoin (BTC/USD)**. 
 
 > Outil d'aide à la décision. Aucun résultat n'est garanti et les performances passées, y compris en backtest, ne préjugent pas des performances futures. Ce n'est pas un conseil en investissement.
 
+## Sections de l'application
+
+| Section | Contenu |
+|---|---|
+| **Trading** | Analyse or / BTC en SMC, CRT, Price Action et **Bot SMC v2** (stratégie du bot Python portée en JavaScript), signaux, gestion du risque, backtest aux règles du moteur Python (commissions, break-even à +1R, plafonds −3 %/jour et −6 %/semaine). |
+| **Annonces** | Calendrier économique de la semaine (ForexFactory), compte à rebours de la prochaine annonce USD à fort impact, effet habituel sur l'or et le BTC, avertissement sur l'écran de trading 30 min avant/après une annonce rouge. |
+| **Football** | Bot d'analyse des matchs (Ligue 1, Premier League, LaLiga, Serie A, Bundesliga, Ligue des champions…) : probabilités 1/N/2, buts attendus, +2,5 buts, les deux équipes marquent, scores probables, comparaison avec les cotes. Modèle de Poisson (Dixon-Coles) sur les forces d'attaque/défense, la forme et l'avantage du terrain. Données ESPN. |
+| **Académie** | Formation : théorie express (6 leçons + quiz), méthode pas à pas en 9 étapes (annonces → biais → liquidité → zones → kill zone → confirmation → entrée/taille → gestion → journal) reliée aux outils de l'app, puis analyse guidée en direct sur le marché réel. Progression enregistrée sur l'appareil. |
+| **Labo** | Le bot de recherche Python (`bot/`) : méthode, résultats, enseignements, rapports complets consultables dans l'app. |
+
+Sources : l'APK lit le calendrier et ESPN directement (HTTP natif Capacitor), l'app PC aussi (Electron). La version web utilise en secours une copie mise à jour toutes les 6 h par GitHub Actions (`.github/workflows/web-data.yml`, branche `data`).
+
 ## Bot de recherche SMC (Python)
 
 Le dossier [`bot/`](bot/README.md) contient le bot de recherche SMC / price action en Python (données 5 ans, détecteurs testés, moteur de backtest avec coûts réels). Voir son README.

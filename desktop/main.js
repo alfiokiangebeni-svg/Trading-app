@@ -1,6 +1,6 @@
 // Alerte Trading — PC application (Windows, macOS, Linux).
 // Loads the same single-page app as the web/Android versions from local files.
-const { app, BrowserWindow, shell, Menu, nativeTheme } = require('electron');
+const { app, BrowserWindow, shell, Menu, nativeTheme, session } = require('electron');
 const path = require('path');
 
 nativeTheme.themeSource = 'dark';
@@ -29,6 +29,14 @@ Menu.setApplicationMenu(Menu.buildFromTemplate([
 ]));
 
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  // The economic calendar (ForexFactory) sends no CORS header: allow the app to read it.
+  session.defaultSession.webRequest.onHeadersReceived({ urls: ['https://nfs.faireconomy.media/*'] }, (details, cb) => {
+    const h = details.responseHeaders || {};
+    h['access-control-allow-origin'] = ['*'];
+    cb({ responseHeaders: h });
+  });
+  createWindow();
+});
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

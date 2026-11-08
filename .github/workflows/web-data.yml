@@ -1,0 +1,64 @@
+name: Données pour la version web (annonces + football)
+
+# Copie de secours, lisible via raw.githubusercontent.com, pour la version web :
+# - le calendrier ForexFactory (qui n'autorise pas la lecture directe depuis une page web) ;
+# - les classements et matchs ESPN des 13 compétitions du bot football (si la lecture directe échoue).
+# L'APK et l'app PC lisent les sources directement ; cette copie ne sert qu'en secours.
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+  push:
+    branches: [claude/trading-analysis-app-gold-btc-zdnf42]
+    paths: ['.github/workflows/web-data.yml']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: web-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1 }
+      - name: Télécharger le calendrier
+        run: |
+          curl -fsSL --retry 3 -A "Mozilla/5.0 (AlerteTrading calendar mirror)" https://nfs.faireconomy.media/ff_calendar_thisweek.json -o /tmp/calendar.json
+          python3 -c "import json; d=json.load(open('/tmp/calendar.json')); assert isinstance(d, list) and len(d) > 5, len(d); print(len(d), 'annonces')"
+      - name: Télécharger les données football (classements + matchs de J-3 à J+6)
+        run: |
+          mkdir -p /tmp/football
+          for lg in fra.1 eng.1 esp.1 ita.1 ger.1 uefa.champions uefa.europa por.1 ned.1 bel.1 tur.1 sau.1 usa.1; do
+            mkdir -p /tmp/football/$lg
+            curl -fsSL --retry 2 --compressed "https://site.api.espn.com/apis/v2/sports/soccer/$lg/standings" -o /tmp/football/$lg/standings.json || echo "standings $lg indisponible"
+            for k in -3 -2 -1 0 1 2 3 4 5 6; do
+              d=$(date -u -d "$k day" +%Y%m%d)
+              curl -fsSL --retry 2 --compressed "https://site.api.espn.com/apis/site/v2/sports/soccer/$lg/scoreboard?dates=$d" -o /tmp/football/$lg/$d.json || echo "$lg $d indisponible"
+              sleep 0.3
+            done
+          done
+          find /tmp/football -name '*.json' -size 0 -delete
+          echo "$(find /tmp/football -name '*.json' | wc -l) fichiers football"
+      - name: Publier dans la branche data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin data >/dev/null; then
+            git fetch --depth 1 origin data
+            git checkout -B data FETCH_HEAD
+          else
+            git checkout --orphan data
+            git rm -rfq --cached .
+            find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          fi
+          cp /tmp/calendar.json calendar.json
+          rm -rf football && cp -r /tmp/football football
+          # garder seulement les journées récentes (les anciennes sont supprimées à chaque passage)
+          git add -A calendar.json football
+          if git diff --cached --quiet; then echo "Pas de changement"; exit 0; fi
+          git commit -m "Données web (annonces + football) $(date -u '+%Y-%m-%d %H:%M') UTC"
+          git push origin data
