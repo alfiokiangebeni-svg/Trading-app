@@ -1,91 +1,135 @@
-/* Alerte Trading — Académie : simulateur de marché (replay façon TradingView) avec professeur.
-   L'élève remonte le marché, le fait défiler comme en réel, trace ses plus hauts / plus bas, OB, FVG,
-   lignes, déclare la tendance puis achète ou vend. Le professeur compare son analyse aux détecteurs
-   du bot (sur les seules bougies déjà visibles : aucune information du futur), explique et note,
-   puis débriefe le trade. Historique = backtest de la stratégie de l'élève. */
+/* Alerte Trading — Académie : simulateur « trader et backtester votre stratégie » (replay façon TradingView).
+   Marchés : or, BTC, EUR/USD, S&P 500. L'élève choisit une semaine (ou remonte le temps), fait défiler le marché
+   comme en réel, trace HH / HL / LH / LL, OB, FVG, MSS, Fibonacci (à la main ou automatique), puis ouvre une ou
+   plusieurs positions dont il règle le stop et l'objectif en faisant glisser les lignes. Le professeur compare
+   son analyse aux détecteurs du bot (sur les seules bougies visibles : aucune information du futur), explique,
+   note chaque trade et suit le parcours de certification (objectif : 26 000 trades gagnants validés). */
 (function () {
   'use strict';
   const TF = { '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400 };
   const HTF = { '5m': '1h', '15m': '4h', '30m': '4h', '1h': '1D', '4h': '1D' };
   const HTF_SEC = { '1h': 3600, '4h': 14400, '1D': 86400 };
+  const SYM = {
+    'XAU/USD': { name: 'Or', dec: 2, contract: 100, unit: 'lot', src: [{ y: 'GC=F', label: 'Or · future GC (COMEX), Yahoo' }, { b: 'PAXGUSDT', label: 'Or · PAXG (Binance)' }] },
+    'BTC/USD': { name: 'Bitcoin', dec: 1, contract: 1, unit: 'BTC', src: [{ b: 'BTCUSDT', label: 'BTC/USDT (Binance)' }] },
+    'EUR/USD': { name: 'EUR/USD', dec: 5, contract: 100000, unit: 'lot', src: [{ y: 'EURUSD=X', label: 'EUR/USD (Yahoo)' }, { b: 'EURUSDT', label: 'EUR/USDT (Binance)' }] },
+    'US500': { name: 'S&P 500', dec: 2, contract: 1, unit: 'lot (1 $/pt)', src: [{ y: 'ES=F', label: 'S&P 500 · future E-mini (CME), Yahoo' }] }
+  };
   const REWIND = [['1w', '1 semaine', 7 * 86400], ['4d', '4 jours', 4 * 86400], ['2d', '2 jours', 2 * 86400], ['1d', '1 journée', 86400],
     ['4h', '4 h', 14400], ['1h', '1 h', 3600], ['30m', '30 min', 1800], ['15m', '15 min', 900], ['5m', '5 min', 300], ['rand', 'Date au hasard', 0]];
-  const SYM = { 'XAU/USD': { bin: 'PAXGUSDT', name: 'Or (PAXG)', dec: 2, contract: 100, unit: 'lot' }, 'BTC/USD': { bin: 'BTCUSDT', name: 'Bitcoin', dec: 1, contract: 1, unit: 'BTC' } };
-  const HIST = 300;            // bougies d'historique avant le point de départ
-  const HKEY = 'at:replay:v1';
+  const SESS = [['Asie', 1200, 1440, '77,163,255'], ['Londres', 120, 300, '242,193,78'], ['New York AM', 420, 600, '31,224,161'], ['New York PM', 810, 960, '31,224,161']];
+  const FIB = [0, 0.236, 0.382, 0.5, 0.618, 0.705, 0.79, 1, -0.272, -0.618];
+  const HIST = 300, MAX_OPEN = 5;
+  const HKEY = 'at:replay:v1', AGG = 'at:replay:agg', MIRROR = 'https://raw.githubusercontent.com/alfiokiangebeni-svg/Trading-app/data/market';
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const css = n => getComputedStyle(document.documentElement).getPropertyValue('--' + n).trim();
   const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
 
   const R = {
-    sym: lsGet('at:rp:sym', 'XAU/USD'), tf: lsGet('at:rp:tf', '15m'), rewind: lsGet('at:rp:rw', '2d'),
-    all: [], cur: 0, sub: 0, live: null, startT: 0, playing: false, speed: 3, timer: null, acc: 0,
+    sym: lsGet('at:rp:sym', 'XAU/USD'), tf: lsGet('at:rp:tf', '15m'), period: lsGet('at:rp:period', 'w1'),
+    balance: lsGet('at:rp:bal', 10000), goal: lsGet('at:rp:goal', 26000),
+    all: [], cur: 0, sub: 0, live: null, startT: 0, endT: 0, playing: false, speed: 3, timer: null, acc: 0,
     tool: 'cursor', pending: null, draws: [], trend: null, showFix: false, marks: [],
-    trade: null, closed: [], msgs: [], loading: false, src: '', scored: null, root: null, onBack: null
+    ticket: null, trades: [], equity: 0, msgs: [], loading: false, src: '', root: null, onBack: null, seq: 0, lastSess: null
   };
-  let chart = null, series = null, ov = null, octx = null, box = null, resizeObs = null;
+  if (!SYM[R.sym]) R.sym = 'XAU/USD';
+  if (!TF[R.tf]) R.tf = '15m';
+  let chart = null, series = null, ov = null, octx = null, box = null, resizeObs = null, plines = [], drag = null;
   const lib = () => window.AT && window.AT.lib;
   const fmt = (x, d) => window.AT ? window.AT.fmt(x, d) : String(x);
-  const fp = x => fmt(x, SYM[R.sym].dec);
-  const dtf = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-  const fT = t => dtf.format(new Date(t * 1000));
+  const dec = () => SYM[R.sym].dec;
+  const fp = x => fmt(x, dec());
+  const DTF = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const DAYF = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: '2-digit', month: '2-digit', timeZone: 'America/New_York' });
+  const DSHORT = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: 'America/New_York' });
+  const NYD = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const fT = t => DTF.format(new Date(t * 1000));
+  const nyMin = t => window.AT && window.AT.nyMinutes ? window.AT.nyMinutes(t) : (new Date(t * 1000).getUTCHours() * 60);
+  function sessionOf(t) { const m = nyMin(t); for (const s of SESS) if (m >= s[1] && m < s[2]) return s[0]; return null; }
+
+  /* ---------------- semaines ---------------- */
+  function weeks(n) { // lundi 00:00 UTC des n dernières semaines
+    const now = new Date(), d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
+    const f = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', timeZone: 'UTC' }), out = [];
+    for (let i = 0; i < n; i++) { const m = new Date(d.getTime() - i * 7 * 86400000), fri = new Date(m.getTime() + 4 * 86400000);
+      out.push({ id: 'w' + i, mon: m.getTime() / 1000, label: (i === 0 ? 'Semaine en cours · ' : '') + `du lun. ${f.format(m)} au ven. ${f.format(fri)}` }); }
+    return out;
+  }
 
   /* ---------------- données ---------------- */
-  async function klines(sym, tf, startT, endT) {
-    const out = [], step = TF[tf] * 1000;
-    let s = startT * 1000;
-    const hosts = ['https://data-api.binance.vision', 'https://api.binance.com'];
-    while (s < endT * 1000) {
-      let ok = false;
-      for (const h of hosts) {
-        try {
-          const r = await fetch(`${h}/api/v3/klines?symbol=${SYM[sym].bin}&interval=${tf}&startTime=${s}&endTime=${endT * 1000}&limit=1000`, { cache: 'no-store' });
-          if (!r.ok) throw new Error(r.status);
-          const j = await r.json();
-          for (const k of j) out.push({ t: Math.floor(k[0] / 1000), o: +k[1], h: +k[2], l: +k[3], c: +k[4] });
-          s = j.length ? j[j.length - 1][0] + step : endT * 1000;
-          ok = true; break;
-        } catch (e) { /* hôte suivant */ }
+  async function getJSON(url) { const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }
+  async function fromBinance(sym, tf, a, b) {
+    const out = [], step = TF[tf] * 1000; let s = a * 1000;
+    while (s < b * 1000) {
+      let j = null;
+      for (const h of ['https://data-api.binance.vision', 'https://api.binance.com']) {
+        try { j = await getJSON(`${h}/api/v3/klines?symbol=${sym}&interval=${tf}&startTime=${s}&endTime=${b * 1000}&limit=1000`); break; } catch (e) { j = null; }
       }
-      if (!ok) throw new Error('Binance injoignable');
-    }
-    const seen = new Set();
-    return out.filter(x => !seen.has(x.t) && seen.add(x.t)).sort((a, b) => a.t - b.t);
-  }
-  function demo(tf, startT, endT) { // données de secours, clairement signalées
-    const sec = TF[tf], out = []; let p = R.sym === 'BTC/USD' ? 78000 : 4000, seed = 7;
-    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-    for (let t = Math.floor(startT / sec) * sec; t < endT; t += sec) {
-      const v = p * 0.0018 * Math.sqrt(sec / 900), o = p, c = o + (rnd() - 0.5) * 2 * v + Math.sin(t / 40000) * v * 0.15;
-      out.push({ t, o, h: Math.max(o, c) + rnd() * v * 0.6, l: Math.min(o, c) - rnd() * v * 0.6, c }); p = c;
+      if (!j) throw new Error('Binance injoignable');
+      for (const k of j) out.push({ t: Math.floor(k[0] / 1000), o: +k[1], h: +k[2], l: +k[3], c: +k[4] });
+      if (!j.length) break; s = j[j.length - 1][0] + step;
     }
     return out;
   }
+  function aggregateTo(rows, sec) {
+    const out = []; let cur = null;
+    for (const x of rows) { const b = Math.floor(x.t / sec) * sec;
+      if (!cur || cur.t !== b) { cur = { t: b, o: x.o, h: x.h, l: x.l, c: x.c }; out.push(cur); } else { cur.h = Math.max(cur.h, x.h); cur.l = Math.min(cur.l, x.l); cur.c = x.c; } }
+    return out;
+  }
+  function parseYahoo(j) {
+    const r = j && j.chart && j.chart.result && j.chart.result[0]; if (!r || !r.timestamp) return [];
+    const q = r.indicators.quote[0], out = [];
+    r.timestamp.forEach((t, i) => { if (q.close[i] != null && q.open[i] != null && q.high[i] != null && q.low[i] != null) out.push({ t, o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i] }); });
+    return out;
+  }
+  async function fromYahoo(sym, tf, a, b) {
+    const base = tf === '4h' || tf === '1h' ? '60m' : tf === '30m' ? '30m' : tf === '15m' ? '15m' : '5m';
+    let rows = [];
+    try { // direct (APK : HTTP natif ; PC : accès autorisé par Electron)
+      rows = parseYahoo(await getJSON(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=${base}&period1=${a}&period2=${b}&includePrePost=true`));
+    } catch (e) { rows = []; }
+    let baseSec = base === '60m' ? 3600 : base === '30m' ? 1800 : base === '15m' ? 900 : 300;
+    if (rows.length < 50) { // copie GitHub (5 min sur 60 jours, 1 h sur 2 ans), mise à jour par web-data.yml
+      const one = base === '60m';
+      const m = await getJSON(`${MIRROR}/${sym.replace(/[^A-Za-z0-9]/g, '_')}_${one ? '1h' : '5m'}.json`);
+      rows = (m.rows || []).filter(x => x[0] >= a && x[0] < b).map(x => ({ t: x[0], o: x[1], h: x[2], l: x[3], c: x[4] }));
+      baseSec = one ? 3600 : 300;
+    }
+    const sec = TF[tf];
+    return sec > baseSec ? aggregateTo(rows, sec) : rows;
+  }
+  async function fetchRange(tf, a, b) {
+    for (const s of SYM[R.sym].src) {
+      try { const rows = s.y ? await fromYahoo(s.y, tf, a, b) : await fromBinance(s.b, tf, a, b);
+        if (rows.length >= 60) { const seen = new Set(); return { rows: rows.filter(x => !seen.has(x.t) && seen.add(x.t)).sort((p, q) => p.t - q.t), label: s.label }; } }
+      catch (e) { /* source suivante */ }
+    }
+    throw new Error('aucune source');
+  }
   async function load(keepTime) {
     const sec = TF[R.tf], now = Math.floor(Date.now() / 1000);
-    let start;
-    if (keepTime && R.all.length) start = cursorTime();
-    else if (R.rewind === 'rand') start = now - Math.floor((3 + Math.random() * 57) * 86400);
-    else start = now - (REWIND.find(r => r[0] === R.rewind) || REWIND[2])[2];
+    let start, end = now;
+    if (keepTime && R.all.length) { start = cursorTime(); end = R.endT || now; }
+    else if (R.period[0] === 'w') { const w = weeks(10).find(x => x.id === R.period) || weeks(1)[0]; start = w.mon - 3 * 3600; end = Math.min(now, w.mon + 5 * 86400 + 2 * 3600); }
+    else if (R.period === 'rand') { start = now - Math.floor((3 + Math.random() * 50) * 86400); end = Math.min(now, start + 400 * sec); }
+    else start = now - (REWIND.find(r => r[0] === R.period) || REWIND[2])[2];
     start = Math.floor(start / sec) * sec;
-    const end = R.rewind === 'rand' && !keepTime ? Math.min(now, start + 400 * sec) : now;
     R.loading = true; renderStatus('Chargement des bougies…');
-    let all, src;
-    try { all = await klines(R.sym, R.tf, start - HIST * sec, end); src = 'Binance · ' + SYM[R.sym].bin; }
-    catch (e) { all = demo(R.tf, start - HIST * sec, end); src = 'données de démonstration (Binance injoignable)'; }
-    // une bougie encore en formation n'est jamais « future » : on la retire
-    if (all.length && all[all.length - 1].t + sec > now) all.pop();
-    R.all = all; R.src = src; R.loading = false;
-    let idx = all.findIndex(x => x.t + sec > start); if (idx < 0) idx = all.length;
-    R.cur = Math.min(all.length, Math.max(Math.min(30, all.length), idx));
-    R.sub = 0; R.live = null; R.startT = start;
-    if (!keepTime) { R.scored = null; }
-    setData();
-    return all.length - R.cur;
+    let res; // marchés avec week-ends fermés : on prend plus d'historique pour avoir ~300 bougies
+    try { res = await fetchRange(R.tf, start - Math.round(HIST * sec * (R.sym === 'BTC/USD' ? 1 : 1.5)), end); }
+    catch (e) { R.loading = false; say(`Impossible de charger ${SYM[R.sym].name} en ${R.tf} pour cette période (connexion, ou historique trop ancien : les UT de 5 à 30 min couvrent environ 60 jours). Essaie une semaine plus récente ou l'UT 1h.`, 'ko'); renderStatus(); return -1; }
+    const all = res.rows; if (all.length && all[all.length - 1].t + sec > now) all.pop();
+    R.all = all; R.src = res.label; R.loading = false; R.endT = end;
+    let idx = all.findIndex(x => x.t >= start); if (idx < 0) idx = all.length;
+    R.cur = Math.min(all.length, Math.max(Math.min(40, all.length), idx)); R.sub = 0; R.live = null; R.startT = start;
+    setData(); return all.length - R.cur;
   }
-  function cursorTime() { const sec = TF[R.tf]; return R.cur ? R.all[R.cur - 1].t + sec : 0; }
+  function cursorTime() { return R.cur ? R.all[R.cur - 1].t + TF[R.tf] : 0; }
   const visible = () => R.all.slice(0, R.cur);
+  const lastPx = () => R.live ? R.live.c : R.all[R.cur - 1].c;
 
   /* ---------------- graphique ---------------- */
   function buildChart() {
@@ -94,182 +138,223 @@
     chart = LC.createChart(box.querySelector('.rp-c'), {
       autoSize: true, crosshair: { mode: 0 },
       layout: { background: { type: 'solid', color: css('chart-bg') }, textColor: css('muted'), fontFamily: 'JetBrains Mono, monospace', fontSize: 11 },
-      grid: { vertLines: { color: css('line') }, horzLines: { color: css('line') } },
-      rightPriceScale: { borderColor: css('line') }, timeScale: { borderColor: css('line'), timeVisible: true, rightOffset: 12 },
-      localization: { locale: 'fr-FR', priceFormatter: p => fp(p) }
+      grid: { vertLines: { visible: false }, horzLines: { color: css('line') } },
+      rightPriceScale: { borderColor: css('line') }, timeScale: { borderColor: css('line'), timeVisible: true, rightOffset: 14 },
+      localization: { locale: 'fr-FR', priceFormatter: p => fp(p), timeFormatter: t => fT(t) }
     });
     const up = css('bull'), dn = css('bear');
-    series = chart.addCandlestickSeries({ upColor: up, downColor: dn, borderUpColor: up, borderDownColor: dn, wickUpColor: up, wickDownColor: dn,
-      priceFormat: { type: 'price', precision: SYM[R.sym].dec, minMove: Math.pow(10, -SYM[R.sym].dec) } });
+    series = chart.addCandlestickSeries({ upColor: up, downColor: dn, borderUpColor: up, borderDownColor: dn, wickUpColor: up, wickDownColor: dn });
     ov = box.querySelector('canvas.rp-ov'); octx = ov.getContext('2d');
     const redraw = () => requestAnimationFrame(drawOverlay);
     chart.timeScale().subscribeVisibleLogicalRangeChange(redraw);
     chart.subscribeCrosshairMove(redraw);
     resizeObs = new ResizeObserver(redraw); resizeObs.observe(box);
-    // Clics / tapotements gérés directement (pointer events : souris et écran tactile)
-    const el = box.querySelector('.rp-c'); let down = null;
-    el.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY }; }, true);
-    el.addEventListener('pointerup', e => {
-      if (!down) return; const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y); down = null;
-      if (moved > 8 || !chart) return;
-      const r = el.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
-      if (x > r.width - chart.priceScale('right').width() || y > r.height - chart.timeScale().height()) return;
-      onClick({ point: { x, y }, logical: chart.timeScale().coordinateToLogical(x) });
-    }, true);
+    bindPointer(box.querySelector('.rp-c'));
   }
-  function destroyChart() { stop(); if (resizeObs) resizeObs.disconnect(); if (chart) chart.remove(); chart = series = null; }
+  function destroyChart() { stop(); if (resizeObs) resizeObs.disconnect(); if (chart) chart.remove(); chart = series = null; plines = []; }
   function setData() {
     if (!series) return;
-    series.applyOptions({ priceFormat: { type: 'price', precision: SYM[R.sym].dec, minMove: Math.pow(10, -SYM[R.sym].dec) } });
+    series.applyOptions({ priceFormat: { type: 'price', precision: dec(), minMove: Math.pow(10, -dec()) } });
     series.setData(visible().map(x => ({ time: x.t, open: x.o, high: x.h, low: x.l, close: x.c })));
-    chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, R.cur - 120), to: R.cur + 12 });
-    tradeLines(); applyMarks(); requestAnimationFrame(drawOverlay); renderStatus();
+    chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, R.cur - 130), to: R.cur + 14 });
+    priceLines(); applyMarks(); requestAnimationFrame(drawOverlay); renderStatus();
   }
 
-  /* ---------------- lecture (play) ---------------- */
-  function path(k) { return k.c >= k.o ? [k.o, k.l, k.h, k.c] : [k.o, k.h, k.l, k.c]; } // trajet réaliste dans la bougie
-  function stepSub() {
-    if (R.cur >= R.all.length) { stop(); say('Fin des données : tu es revenu au présent. Relance une séance pour t\'entraîner encore.', 'info'); return false; }
-    const k = R.all[R.cur], pts = path(k), i = R.sub;
-    const prev = R.live ? R.live.c : k.o, px = pts[i];
-    R.live = i === 0 ? { t: k.t, o: k.o, h: k.o, l: k.o, c: k.o } : R.live;
-    R.live.c = px; R.live.h = Math.max(R.live.h, px); R.live.l = Math.min(R.live.l, px);
-    series.update({ time: k.t, open: R.live.o, high: R.live.h, low: R.live.l, close: R.live.c });
-    checkTrade(prev, px, k.t);
-    R.sub++;
-    if (R.sub >= 4) { R.sub = 0; R.live = null; R.cur++; onCandleClosed(); }
-    return true;
+  /* ---------------- souris / tactile : tracés et glisser des lignes SL / TP ---------------- */
+  function lineHit(y) {
+    let best = null, bd = 14;
+    const cand = []; if (R.ticket) cand.push([R.ticket, 'sl'], [R.ticket, 'tp']);
+    R.trades.filter(t => t.open).forEach(t => cand.push([t, 'sl'], [t, 'tp']));
+    for (const [t, k] of cand) { const py = series.priceToCoordinate(t[k]); if (py != null && Math.abs(py - y) < bd) { bd = Math.abs(py - y); best = { t, k }; } }
+    return best;
   }
-  function stepCandle() { do { if (!stepSub()) break; } while (R.sub !== 0); requestAnimationFrame(drawOverlay); renderStatus(); }
-  function play() {
-    if (R.playing || R.loading) return; R.playing = true; R.acc = 0;
-    R.timer = setInterval(() => {
-      R.acc += R.speed * 4 * 40 / 1000; // sous-étapes à jouer
-      let n = Math.floor(R.acc); R.acc -= n;
-      while (n-- > 0 && R.playing) if (!stepSub()) break;
-      requestAnimationFrame(drawOverlay); renderStatus();
-    }, 40);
-    renderControls();
+  function bindPointer(el) {
+    let down = null;
+    const rel = e => { const r = el.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top, r }; };
+    el.addEventListener('pointerdown', e => {
+      down = { x: e.clientX, y: e.clientY };
+      if (!chart) return; const p = rel(e), hit = lineHit(p.y);
+      if (hit) { drag = Object.assign(hit, { from: hit.t[hit.k] }); chart.applyOptions({ handleScroll: false, handleScale: false });
+        try { el.setPointerCapture(e.pointerId); } catch (err) {} }
+    }, true);
+    el.addEventListener('pointermove', e => {
+      if (!chart) return; const p = rel(e);
+      if (drag) { const price = series.coordinateToPrice(p.y); if (price == null) return; drag.t[drag.k] = price; priceLines(); renderTicket(); renderPositions(); requestAnimationFrame(drawOverlay); return; }
+      el.style.cursor = lineHit(p.y) ? 'ns-resize' : (R.tool === 'cursor' ? '' : 'crosshair');
+    }, true);
+    el.addEventListener('pointerup', e => {
+      if (drag) { const d = drag; drag = null; chart.applyOptions({ handleScroll: R.tool === 'cursor', handleScale: true }); afterDrag(d); down = null; return; }
+      if (!down || !chart) return; const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y); down = null;
+      if (moved > 8) return; const p = rel(e);
+      if (p.x > p.r.width - chart.priceScale('right').width() || p.y > p.r.height - chart.timeScale().height()) return;
+      onClick({ x: p.x, y: p.y });
+    }, true);
+    el.addEventListener('pointercancel', () => { if (drag) { drag = null; chart && chart.applyOptions({ handleScroll: true, handleScale: true }); } down = null; }, true);
   }
-  function stop() { R.playing = false; if (R.timer) clearInterval(R.timer); R.timer = null; renderControls(); }
-  function onCandleClosed() {
-    const t = R.trade;
-    if (t && t.open) {
-      const r = (R.all[R.cur - 1].c - t.entry) * t.dir / t.risk;
-      if (!t.hint1 && r >= 1) { t.hint1 = true; say('Le trade atteint +1R. Le plan dit : stop au point d\'entrée (bouton « Stop au break-even ») pour qu\'il ne puisse plus coûter.', 'tip'); }
-      if (!t.hintStruct) {
-        const L = lib(), vis = visible(), ms = L.marketStructure(vis, L.findSwings(vis, 3));
-        const last = ms.events[ms.events.length - 1];
-        if (last && last.at === R.cur - 1 && last.dir === -t.dir) { t.hintStruct = true; say(`Attention : ${last.kind} ${last.dir === 1 ? 'haussier' : 'baissier'} contre ta position à ${fp(last.level)}. La raison du trade s'affaiblit : surveille ton stop.`, 'warn'); }
-      }
+  function afterDrag(d) {
+    const t = d.t, k = d.k;
+    if (t.open && k === 'sl') {
+      if ((t.sl - lastPx()) * t.dir >= 0) { t.sl = d.from; say('Le stop ne peut pas être placé de l\'autre côté du prix actuel.', 'warn'); }
+      else if (Math.abs(t.entry - t.sl) > Math.abs(t.entry - d.from) + 1e-12 && (t.sl - t.entry) * t.dir < 0) {
+        t.widened = true; say(`Trade n°${t.id} : tu as éloigné ton stop (${fp(d.from)} → ${fp(t.sl)}), le risque monte à ${fmt(riskNow(t), 0)} $. Règle d'or : on ne déplace jamais son stop contre soi (ce trade ne pourra pas être validé).`, 'ko'); }
+      else say(`Trade n°${t.id} : stop rapproché à ${fp(t.sl)}${Math.abs(t.sl - t.entry) < 1e-9 ? ' (break-even)' : ''}, risque réduit à ${fmt(riskNow(t), 0)} $.`, 'ok');
+    } else if (t.open && k === 'tp') {
+      if ((t.tp - lastPx()) * t.dir <= 0) { t.tp = d.from; say('L\'objectif doit rester au-delà du prix actuel.', 'warn'); }
+      else say(`Trade n°${t.id} : objectif déplacé à ${fp(t.tp)}.`, 'info');
     }
+    priceLines(); renderTicket(); renderPositions(); requestAnimationFrame(drawOverlay);
   }
-
-  /* ---------------- outils de tracé ---------------- */
-  const TOOLS = [['cursor', '↖', 'Curseur'], ['hi', 'H', 'Plus haut'], ['lo', 'B', 'Plus bas'], ['ob', 'OB', 'Order block (clic sur la bougie)'], ['fvg', 'FVG', 'FVG (clic sur la bougie du milieu)'],
-    ['hline', '—', 'Ligne horizontale'], ['tline', '╱', 'Ligne de tendance (2 clics)'], ['erase', '⌫', 'Gomme']];
   function logicalOf(t) { const a = R.all; if (!a.length) return 0; const sec = TF[R.tf];
     let lo = 0, hi = a.length - 1; if (t >= a[hi].t) return hi + (t - a[hi].t) / sec; if (t <= a[0].t) return (t - a[0].t) / sec;
     while (hi - lo > 1) { const m = (lo + hi) >> 1; if (a[m].t <= t) lo = m; else hi = m; } return lo + (t - a[lo].t) / (a[hi].t - a[lo].t); }
-  function xOf(t) { return chart.timeScale().logicalToCoordinate(logicalOf(t)); }
-  function candleAt(param) {
-    let l = param.logical; if (l == null && param.point) l = chart.timeScale().coordinateToLogical(param.point.x);
-    if (l == null) return null; const i = Math.round(l); if (i < 0 || i >= R.cur) return null; return { i, k: R.all[i] };
+  const xOf = t => chart.timeScale().logicalToCoordinate(logicalOf(t));
+  function candleAtX(x) { const l = chart.timeScale().coordinateToLogical(x); if (l == null) return null; const i = Math.round(l); if (i < 0 || i >= R.cur) return null; return { i, k: R.all[i] }; }
+  function timeAtX(x) { const i = Math.round(chart.timeScale().coordinateToLogical(x)); if (i >= 0 && i < R.all.length) return R.all[i].t; const last = R.all[R.cur - 1]; return last.t + (i - (R.cur - 1)) * TF[R.tf]; }
+  function snapPrice(x, y) { // aimant sur la mèche la plus proche
+    const price = series.coordinateToPrice(y), ck = candleAtX(x); if (!ck) return { t: timeAtX(x), p: price };
+    const a = lib().atrArr(visible()), tol = a[a.length - 1] * 0.35;
+    if (Math.abs(price - ck.k.h) <= tol) return { t: ck.k.t, p: ck.k.h, i: ck.i };
+    if (Math.abs(price - ck.k.l) <= tol) return { t: ck.k.t, p: ck.k.l, i: ck.i };
+    return { t: ck.k.t, p: price, i: ck.i };
   }
-  function onClick(param) {
-    if (!param.point || R.tool === 'cursor') return;
-    const price = series.coordinateToPrice(param.point.y); const ck = candleAt(param);
-    const tAt = () => { const l = chart.timeScale().coordinateToLogical(param.point.x); const i = Math.round(l);
-      if (i >= 0 && i < R.all.length) return R.all[i].t; const last = R.all[R.cur - 1]; return last.t + (i - (R.cur - 1)) * TF[R.tf]; };
-    if (R.tool === 'erase') { eraseNear(param.point.x, param.point.y); return; }
-    if (R.tool === 'hi' || R.tool === 'lo') {
-      if (!ck) return; const hi = R.tool === 'hi';
-      R.draws = R.draws.filter(d => !((d.type === 'hi' || d.type === 'lo') && d.t === ck.k.t));
-      R.draws.push({ type: R.tool, t: ck.k.t, p: hi ? ck.k.h : ck.k.l, tf: R.tf });
-      const n = R.draws.filter(d => d.type === 'hi' || d.type === 'lo').length;
-      if (n === 4) say('Bien. Avec 2 plus hauts et 2 plus bas, la structure apparaît : sommets et creux montent-ils (HH / HL) ou descendent-ils (LH / LL) ? Déclare la tendance à droite.', 'tip');
+
+  /* ---------------- outils ---------------- */
+  const TOOLS = [['cursor', '↖', 'Curseur'], ['HH', 'HH', 'Higher high'], ['HL', 'HL', 'Higher low'], ['LH', 'LH', 'Lower high'], ['LL', 'LL', 'Lower low'],
+    ['ob', 'OB', 'Order block'], ['fvg', 'FVG', 'Fair value gap'], ['mss', 'MSS', 'Market structure shift'], ['fib', 'Fib', 'Fibonacci manuel'],
+    ['hline', '—', 'Ligne'], ['tline', '╱', 'Tendance'], ['erase', '⌫', 'Gomme']];
+  const TIPS = { HH: 'HH : clique sur un sommet plus haut que le précédent (aimanté sur la mèche haute).', HL: 'HL : clique sur un creux plus haut que le précédent (mèche basse).',
+    LH: 'LH : clique sur un sommet plus bas que le précédent.', LL: 'LL : clique sur un creux plus bas que le précédent.', ob: 'OB : clique sur la dernière bougie opposée avant l\'impulsion.',
+    fvg: 'FVG : clique sur la bougie du milieu d\'un mouvement de 3 bougies.', mss: 'MSS : clique sur la bougie qui casse la structure contraire avec force (déplacement).',
+    fib: 'Fibonacci : clique sur le début puis la fin du mouvement (aimanté sur les mèches).', hline: 'Clique à la hauteur du niveau.', tline: 'Clique sur deux points.', erase: 'Clique sur un tracé pour l\'effacer.' };
+  function onClick(pt) {
+    if (R.tool === 'cursor' || !R.cur) return;
+    const ck = candleAtX(pt.x), price = series.coordinateToPrice(pt.y);
+    if (R.tool === 'erase') { eraseNear(pt.x, pt.y); return; }
+    if (['HH', 'HL', 'LH', 'LL'].includes(R.tool)) {
+      if (!ck) return; const hi = R.tool === 'HH' || R.tool === 'LH';
+      R.draws = R.draws.filter(d => !(d.type === 'sw' && d.t === ck.k.t && d.hi === hi));
+      const d = { type: 'sw', lab: R.tool, hi, t: ck.k.t, p: hi ? ck.k.h : ck.k.l, i: ck.i, tf: R.tf }; R.draws.push(d); checkSwing(d);
     } else if (R.tool === 'ob') {
-      if (!ck) return; const k = ck.k, dir = k.c < k.o ? 1 : -1; // bougie baissière = OB haussier potentiel, et inversement
-      R.draws.push({ type: 'ob', t: k.t, top: k.h, bot: k.l, dir, i: ck.i, tf: R.tf }); quickOB(R.draws[R.draws.length - 1]);
+      if (!ck) return; const k = ck.k, d = { type: 'ob', t: k.t, top: k.h, bot: k.l, dir: k.c < k.o ? 1 : -1, i: ck.i, tf: R.tf }; R.draws.push(d); quickOB(d);
     } else if (R.tool === 'fvg') {
       if (!ck || ck.i < 1 || ck.i + 1 >= R.cur) { say('Pour un FVG, clique sur la bougie du milieu d\'un mouvement de 3 bougies déjà clôturées.', 'warn'); return; }
-      const a = R.all[ck.i - 1], c = R.all[ck.i + 1];
-      if (c.l > a.h) R.draws.push({ type: 'fvg', t: R.all[ck.i].t, top: c.l, bot: a.h, dir: 1, i: ck.i, tf: R.tf });
-      else if (c.h < a.l) R.draws.push({ type: 'fvg', t: R.all[ck.i].t, top: a.l, bot: c.h, dir: -1, i: ck.i, tf: R.tf });
-      else { say(`Pas de FVG ici : le bas de la bougie suivante (${fp(c.l)}) ne dépasse pas le haut de la précédente (${fp(a.h)}), et inversement. Un FVG est un « trou » entre la mèche de la bougie 1 et celle de la bougie 3.`, 'warn'); return; }
-      quickFVG(R.draws[R.draws.length - 1]);
-    } else if (R.tool === 'hline') { R.draws.push({ type: 'hline', p: price }); }
+      const a = R.all[ck.i - 1], c = R.all[ck.i + 1]; let d;
+      if (c.l > a.h) d = { type: 'fvg', t: R.all[ck.i].t, top: c.l, bot: a.h, dir: 1, i: ck.i, tf: R.tf };
+      else if (c.h < a.l) d = { type: 'fvg', t: R.all[ck.i].t, top: a.l, bot: c.h, dir: -1, i: ck.i, tf: R.tf };
+      else { say(`Pas de FVG ici : les mèches des bougies 1 et 3 se recouvrent (${fp(a.l)} – ${fp(a.h)} et ${fp(c.l)} – ${fp(c.h)}). Un FVG est un trou entre les deux.`, 'warn'); return; }
+      R.draws.push(d); quickFVG(d);
+    } else if (R.tool === 'mss') { if (!ck) return; markMSS(ck.i); }
+    else if (R.tool === 'fib') {
+      const s = snapPrice(pt.x, pt.y);
+      if (!R.pending) { R.pending = s; renderStatus('Fibonacci : clique maintenant sur la fin du mouvement.'); requestAnimationFrame(drawOverlay); return; }
+      const d = { type: 'fib', t1: R.pending.t, p1: R.pending.p, t2: s.t, p2: s.p, tf: R.tf }; R.pending = null; R.draws.push(d); checkFib(d);
+    } else if (R.tool === 'hline') R.draws.push({ type: 'hline', p: price });
     else if (R.tool === 'tline') {
-      if (!R.pending) { R.pending = { t: tAt(), p: price }; say('Deuxième clic pour terminer la ligne de tendance.', 'info'); return; }
-      R.draws.push({ type: 'tline', t1: R.pending.t, p1: R.pending.p, t2: tAt(), p2: price }); R.pending = null;
-    } else if (R.tool === 'sl' || R.tool === 'tp') {
-      if (R.trade && !R.trade.open) { R.trade[R.tool] = price; R.tool = 'cursor'; chart.applyOptions({ handleScroll: true }); renderTicket(); tradeLines(); renderTools(); }
-      return;
+      if (!R.pending) { R.pending = { t: timeAtX(pt.x), p: price }; renderStatus('Deuxième clic pour terminer la ligne.'); return; }
+      R.draws.push({ type: 'tline', t1: R.pending.t, p1: R.pending.p, t2: timeAtX(pt.x), p2: price }); R.pending = null;
     }
-    requestAnimationFrame(drawOverlay); renderStats();
+    requestAnimationFrame(drawOverlay);
   }
   function eraseNear(x, y) {
     let best = -1, bd = 18;
+    const seg = (ax, ay, bx, by) => { if ([ax, ay, bx, by].some(v => v == null)) return 1e9; const L2 = (bx - ax) ** 2 + (by - ay) ** 2 || 1; const u = Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / L2)); return Math.hypot(ax + u * (bx - ax) - x, ay + u * (by - ay) - y); };
     R.draws.forEach((d, i) => {
-      let dist = 1e9;
-      if (d.type === 'hi' || d.type === 'lo') { const px = xOf(d.t), py = series.priceToCoordinate(d.p); if (px != null && py != null) dist = Math.hypot(px - x, py - y); }
-      else if (d.type === 'hline') { const py = series.priceToCoordinate(d.p); if (py != null) dist = Math.abs(py - y); }
-      else if (d.type === 'ob' || d.type === 'fvg') { const y0 = series.priceToCoordinate(d.top), y1 = series.priceToCoordinate(d.bot), x0 = xOf(d.t);
-        if (y0 != null && y1 != null && x0 != null && x >= x0 - 6 && y >= Math.min(y0, y1) - 6 && y <= Math.max(y0, y1) + 6) dist = 0; }
-      else if (d.type === 'tline') { const ax = xOf(d.t1), ay = series.priceToCoordinate(d.p1), bx = xOf(d.t2), by = series.priceToCoordinate(d.p2);
-        if ([ax, ay, bx, by].every(v => v != null)) { const L2 = (bx - ax) ** 2 + (by - ay) ** 2 || 1; const u = Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / L2)); dist = Math.hypot(ax + u * (bx - ax) - x, ay + u * (by - ay) - y); } }
+      let dist = 1e9; const Y = p => series.priceToCoordinate(p);
+      if (d.type === 'sw') { const px = xOf(d.t), py = Y(d.p); if (px != null && py != null) dist = Math.hypot(px - x, py - y); }
+      else if (d.type === 'hline') { const py = Y(d.p); if (py != null) dist = Math.abs(py - y); }
+      else if (d.type === 'ob' || d.type === 'fvg') { const y0 = Y(d.top), y1 = Y(d.bot), x0 = xOf(d.t); if (y0 != null && y1 != null && x0 != null && x >= x0 - 6 && y >= Math.min(y0, y1) - 6 && y <= Math.max(y0, y1) + 6) dist = 0; }
+      else if (d.type === 'tline' || d.type === 'fib' || d.type === 'mss') dist = seg(xOf(d.t1), Y(d.p1), xOf(d.t2), Y(d.p2 != null ? d.p2 : d.p1));
       if (dist < bd) { bd = dist; best = i; }
     });
-    if (best >= 0) { R.draws.splice(best, 1); requestAnimationFrame(drawOverlay); renderStats(); }
+    if (best >= 0) { R.draws.splice(best, 1); requestAnimationFrame(drawOverlay); }
   }
 
-  /* ---------------- dessin (canvas) ---------------- */
+  /* ---------------- dessin ---------------- */
   function drawOverlay() {
     if (!chart || !ov) return;
     const r = box.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
     ov.width = Math.round(r.width * dpr); ov.height = Math.round(r.height * dpr); ov.style.width = r.width + 'px'; ov.style.height = r.height + 'px';
     const g = octx; g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, r.width, r.height);
-    const W = r.width - chart.priceScale('right').width(), H = r.height - chart.timeScale().height();
+    if (!R.cur) return;
+    const W = r.width - chart.priceScale('right').width(), H = r.height - chart.timeScale().height(), ts = chart.timeScale();
+    const Y = p => series.priceToCoordinate(p);
     g.save(); g.beginPath(); g.rect(0, 0, W, H); g.clip();
-    g.font = '600 10px "JetBrains Mono", monospace';
-    const col = { bull: css('bull'), bear: css('bear'), acc: css('accent'), mut: css('muted'), fg: css('fg') };
+    const F = '600 10px "JetBrains Mono", monospace'; g.font = F;
+    const col = { bull: css('bull'), bear: css('bear'), acc: css('accent'), mut: css('muted'), fg: css('fg'), faint: css('faint') };
+    // ---- journées et sessions (heure de New York)
+    const rng = ts.getVisibleLogicalRange();
+    if (rng) {
+      const a = Math.max(0, Math.floor(rng.from)), b = Math.min(R.cur - 1, Math.ceil(rng.to));
+      const bw = Math.max(1, Math.abs((ts.logicalToCoordinate(1) || 0) - (ts.logicalToCoordinate(0) || 0)) || 6);
+      let prevDay = null, runS = null, runX0 = 0;
+      const flush = xEnd => { if (!runS) return; const s = SESS.find(z => z[0] === runS); g.fillStyle = `rgba(${s[3]},0.06)`; g.fillRect(runX0, 0, xEnd - runX0, H);
+        g.fillStyle = `rgba(${s[3]},0.6)`; g.fillRect(runX0, H - 4, xEnd - runX0, 4); if (xEnd - runX0 > 44) { g.fillStyle = `rgba(${s[3]},0.95)`; g.fillText(runS, runX0 + 3, H - 8); } };
+      for (let i = a; i <= b; i++) {
+        const t = R.all[i].t, x = ts.logicalToCoordinate(i); if (x == null) continue;
+        const s = sessionOf(t);
+        if (s !== runS) { flush(x - bw / 2); runS = s; runX0 = x - bw / 2; }
+        const day = NYD.format(new Date(t * 1000));
+        if (prevDay !== null && day !== prevDay) { g.strokeStyle = col.faint; g.setLineDash([4, 4]); g.beginPath(); g.moveTo(x - bw / 2, 0); g.lineTo(x - bw / 2, H); g.stroke(); g.setLineDash([]);
+          g.fillStyle = col.mut; g.font = '700 11px "Inter", sans-serif'; g.fillText(DSHORT.format(new Date(t * 1000)), x - bw / 2 + 4, 14); g.font = F; }
+        prevDay = day;
+      }
+      flush((ts.logicalToCoordinate(b) || 0) + bw / 2);
+    }
     const zone = (d, dashed, alpha) => {
-      const y0 = series.priceToCoordinate(d.top), y1 = series.priceToCoordinate(d.bot); let x0 = xOf(d.t); if (y0 == null || y1 == null) return; if (x0 == null) x0 = 0;
+      const y0 = Y(d.top), y1 = Y(d.bot); let x0 = xOf(d.t); if (y0 == null || y1 == null) return; if (x0 == null) x0 = 0;
       const c = d.type === 'fvg' ? col.acc : (d.dir === 1 ? col.bull : col.bear);
       g.globalAlpha = alpha; g.fillStyle = c; g.fillRect(x0, Math.min(y0, y1), W - x0, Math.max(2, Math.abs(y1 - y0))); g.globalAlpha = 1;
       g.strokeStyle = c; g.setLineDash(dashed ? [5, 4] : []); g.strokeRect(x0 + .5, Math.min(y0, y1) + .5, W - x0 - 1, Math.max(2, Math.abs(y1 - y0)) - 1); g.setLineDash([]);
       g.fillStyle = c; g.fillText((d.type === 'fvg' ? 'FVG' : 'OB') + (dashed ? ' (prof)' : ''), x0 + 4, Math.min(y0, y1) + 11);
     };
-    // correction du professeur (pointillés)
+    const fib = (d, dashed) => {
+      const xa = xOf(d.t1), xb = xOf(d.t2), x0 = Math.min(xa == null ? 0 : xa, xb == null ? 0 : xb), A = d.p1, B = d.p2, span = B - A;
+      const yo1 = Y(B - span * 0.62), yo2 = Y(B - span * 0.79);
+      if (yo1 != null && yo2 != null) { g.fillStyle = col.acc; g.globalAlpha = dashed ? 0.06 : 0.12; g.fillRect(x0, Math.min(yo1, yo2), W - x0, Math.abs(yo2 - yo1)); g.globalAlpha = 1; }
+      for (const lv of FIB) { const y = Y(B - span * lv); if (y == null) continue;
+        const key = lv === 0.5 || lv === 0.618 || lv === 0.705 || lv === 0.79; g.strokeStyle = key ? col.acc : col.mut; g.setLineDash(dashed ? [5, 4] : (lv < 0 ? [2, 3] : []));
+        g.beginPath(); g.moveTo(x0, y); g.lineTo(W, y); g.stroke(); g.setLineDash([]);
+        g.fillStyle = g.strokeStyle; const pc = `${String(+(Math.abs(lv) * 100).toFixed(1)).replace('.', ',')} %`; g.fillText(W < 520 ? (lv < 0 ? '−' : '') + pc : `${lv < 0 ? 'cible ' : ''}${pc} · ${fp(B - span * lv)}`, x0 + 4, y - 3); }
+      const ay = Y(A), by = Y(B);
+      if ([xa, ay, xb, by].every(v => v != null)) { g.strokeStyle = col.fg; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(xa, ay); g.lineTo(xb, by); g.stroke(); g.setLineDash([]); }
+      const ym = Y(B - span * 0.705); if (ym != null && W >= 520) { g.fillStyle = col.acc; g.fillText(dashed ? 'OTE (prof)' : 'OTE 62–79 %', W - 96, ym + 4); }
+    };
+    // ---- correction du professeur
     if (R.showFix && R.cur > 30) {
       const fx = teacherView();
-      fx.obs.forEach(o => zone(Object.assign({ type: 'ob' }, o), true, 0.07));
-      fx.fvgs.forEach(f => zone(Object.assign({ type: 'fvg' }, f), true, 0.07));
-      fx.swings.forEach(s => { const x = xOf(s.t), y = series.priceToCoordinate(s.p); if (x == null || y == null) return;
+      fx.obs.forEach(o => zone(Object.assign({ type: 'ob' }, o), true, 0.06));
+      fx.fvgs.forEach(f => zone(Object.assign({ type: 'fvg' }, f), true, 0.06));
+      fx.swings.forEach(s => { const x = xOf(s.t), y = Y(s.p); if (x == null || y == null) return;
         g.strokeStyle = col.acc; g.setLineDash([3, 3]); g.beginPath(); g.arc(x, y, 7, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
         g.fillStyle = col.acc; g.fillText(s.label, x - 8, s.hi ? y - 12 : y + 20); });
-      fx.events.forEach(e => { const x0 = xOf(e.tFrom), x1 = xOf(e.t), y = series.priceToCoordinate(e.level); if (x0 == null || x1 == null || y == null) return;
+      fx.events.forEach(e => { const x0 = xOf(e.tFrom), x1 = xOf(e.t), y = Y(e.level); if (x0 == null || x1 == null || y == null) return;
         g.strokeStyle = e.dir === 1 ? col.bull : col.bear; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(x0, y); g.lineTo(x1, y); g.stroke(); g.setLineDash([]);
-        g.fillStyle = g.strokeStyle; g.fillText(e.kind, (x0 + x1) / 2 - 12, y + (e.dir === 1 ? -4 : 12)); });
+        g.fillStyle = g.strokeStyle; g.fillText(e.mss ? 'MSS' : e.kind, (x0 + x1) / 2 - 12, y + (e.dir === 1 ? -4 : 12)); });
+      if (fx.leg) fib(fx.leg, true);
     }
-    // tracés de l'élève
+    // ---- tracés de l'élève
     for (const d of R.draws) {
       if (d.type === 'ob' || d.type === 'fvg') zone(d, false, 0.14);
-      else if (d.type === 'hline') { const y = series.priceToCoordinate(d.p); if (y == null) continue; g.strokeStyle = col.fg; g.lineWidth = 1; g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); g.fillStyle = col.fg; g.fillText(fp(d.p), 4, y - 3); }
-      else if (d.type === 'tline') { const ax = xOf(d.t1), ay = series.priceToCoordinate(d.p1), bx = xOf(d.t2), by = series.priceToCoordinate(d.p2);
-        if ([ax, ay, bx, by].some(v => v == null)) continue; const k = (by - ay) / ((bx - ax) || 1); g.strokeStyle = col.fg; g.lineWidth = 1.5; g.beginPath(); g.moveTo(ax, ay); g.lineTo(W, ay + k * (W - ax)); g.stroke(); g.lineWidth = 1; }
+      else if (d.type === 'fib') fib(d, false);
+      else if (d.type === 'hline') { const y = Y(d.p); if (y == null) continue; g.strokeStyle = col.fg; g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); g.fillStyle = col.fg; g.fillText(fp(d.p), 4, y - 3); }
+      else if (d.type === 'tline') { const ax = xOf(d.t1), ay = Y(d.p1), bx = xOf(d.t2), by = Y(d.p2); if ([ax, ay, bx, by].some(v => v == null)) continue;
+        const k = (by - ay) / ((bx - ax) || 1); g.strokeStyle = col.fg; g.lineWidth = 1.5; g.beginPath(); g.moveTo(ax, ay); g.lineTo(W, ay + k * (W - ax)); g.stroke(); g.lineWidth = 1; }
+      else if (d.type === 'mss') { const x0 = xOf(d.t1), x1 = xOf(d.t2), y = Y(d.p1); if (x0 == null || x1 == null || y == null) continue;
+        g.strokeStyle = d.dir === 1 ? col.bull : col.bear; g.lineWidth = 2; g.beginPath(); g.moveTo(x0, y); g.lineTo(x1, y); g.stroke(); g.lineWidth = 1;
+        g.fillStyle = g.strokeStyle; g.font = '700 11px "JetBrains Mono", monospace'; g.fillText(d.ok ? 'MSS' : 'MSS ?', (x0 + x1) / 2 - 14, y + (d.dir === 1 ? -6 : 15)); g.font = F; }
     }
-    const marks = R.draws.filter(d => d.type === 'hi' || d.type === 'lo').sort((a, b) => a.t - b.t);
-    const lastHi = {}, lab = new Map();
-    for (const m of marks) { const prev = lastHi[m.type]; lab.set(m, prev == null ? (m.type === 'hi' ? 'H' : 'B') : m.type === 'hi' ? (m.p > prev ? 'HH' : 'LH') : (m.p > prev ? 'HL' : 'LL')); lastHi[m.type] = m.p; }
-    if (marks.length > 1) { g.strokeStyle = col.mut; g.setLineDash([]); g.beginPath(); let first = true;
-      for (const m of marks) { const x = xOf(m.t), y = series.priceToCoordinate(m.p); if (x == null || y == null) continue; if (first) { g.moveTo(x, y); first = false; } else g.lineTo(x, y); } g.stroke(); }
-    for (const m of marks) { const x = xOf(m.t), y = series.priceToCoordinate(m.p); if (x == null || y == null) continue;
-      const hi = m.type === 'hi', c = hi ? col.bear : col.bull; g.fillStyle = c; g.beginPath(); g.arc(x, y, 4.5, 0, Math.PI * 2); g.fill();
-      g.font = '700 11px "JetBrains Mono", monospace'; g.fillText(lab.get(m), x - 9, hi ? y - 9 : y + 17); g.font = '600 10px "JetBrains Mono", monospace'; }
-    if (R.pending) { const x = xOf(R.pending.t), y = series.priceToCoordinate(R.pending.p); if (x != null && y != null) { g.fillStyle = col.fg; g.beginPath(); g.arc(x, y, 4, 0, Math.PI * 2); g.fill(); } }
-    // point de départ du replay
-    const xs = xOf(R.startT); if (xs != null && xs > 0) { g.strokeStyle = col.acc; g.globalAlpha = .5; g.setLineDash([2, 4]); g.beginPath(); g.moveTo(xs, 0); g.lineTo(xs, H); g.stroke(); g.setLineDash([]); g.globalAlpha = 1; g.fillStyle = col.acc; g.fillText('départ replay', xs + 4, 12); }
+    const sws = R.draws.filter(d => d.type === 'sw').sort((a, b) => a.t - b.t);
+    if (sws.length > 1) { g.strokeStyle = col.mut; g.beginPath(); let first = true; for (const m of sws) { const x = xOf(m.t), y = Y(m.p); if (x == null || y == null) continue; if (first) { g.moveTo(x, y); first = false; } else g.lineTo(x, y); } g.stroke(); }
+    for (const m of sws) { const x = xOf(m.t), y = Y(m.p); if (x == null || y == null) continue;
+      g.fillStyle = m.hi ? col.bear : col.bull; g.beginPath(); g.arc(x, y, 4.5, 0, Math.PI * 2); g.fill();
+      g.font = '700 11px "JetBrains Mono", monospace'; g.fillText(m.lab, x - 9, m.hi ? y - 9 : y + 17); g.font = F; }
+    if (R.pending) { const x = xOf(R.pending.t), y = Y(R.pending.p); if (x != null && y != null) { g.fillStyle = col.fg; g.beginPath(); g.arc(x, y, 4, 0, Math.PI * 2); g.fill(); } }
+    const xs = xOf(R.startT); if (xs != null && xs > 0) { g.strokeStyle = col.acc; g.globalAlpha = .45; g.setLineDash([2, 4]); g.beginPath(); g.moveTo(xs, 0); g.lineTo(xs, H); g.stroke(); g.setLineDash([]); g.globalAlpha = 1; g.fillStyle = col.acc; g.fillText('départ', xs + 4, 26); }
+    // poignées « ⇕ » pour glisser stop / objectif
+    const handles = []; if (R.ticket) handles.push(R.ticket); R.trades.filter(t => t.open).forEach(t => handles.push(t));
+    for (const t of handles) for (const k of ['sl', 'tp']) { const y = Y(t[k]); if (y == null) continue;
+      g.fillStyle = k === 'sl' ? col.bear : col.bull; g.beginPath(); if (g.roundRect) g.roundRect(W - 52, y - 9, 46, 18, 6); else g.rect(W - 52, y - 9, 46, 18); g.fill();
+      g.fillStyle = '#fff'; g.fillText('⇕ ' + k.toUpperCase(), W - 47, y + 4); }
     g.restore();
   }
 
@@ -281,318 +366,399 @@
     const swings = label(sw.hs, true).concat(label(sw.ls, false)).filter(s => s.i >= from);
     const obs = L.orderBlocks(vis, ms.events).filter(o => !o.broken && o.i >= from).slice(-6);
     const fvgs = L.fairValueGaps(vis, atr).filter(f => !f.filled && f.i >= from).slice(-6);
-    const events = ms.events.filter(e => e.at >= from).slice(-5);
-    let htf = 0; const H = L.aggregate(vis, HTF_SEC[HTF[R.tf]]).slice(0, -1);
-    if (H.length >= 12) htf = L.marketStructure(H, L.findSwings(H, 2)).trend;
-    let Hh = null, Ll = null; if (ms.lastH) Hh = ms.lastH.p; if (ms.lastL) Ll = ms.lastL.p;
-    const px = vis[n - 1].c, pos = Hh != null && Ll != null && Hh > Ll ? (px - Ll) / (Hh - Ll) : null;
-    return { swings, obs, fvgs, events, trend: ms.trend, lastEv: ms.events[ms.events.length - 1] || null, htf, atr: atr[n - 1], pos, Hh, Ll, px, sw, from };
+    const events = ms.events.filter(e => e.at >= from).slice(-6).map(e => Object.assign({}, e, { mss: e.kind === 'CHoCH' && Math.abs(vis[e.at].c - vis[e.at].o) >= 1.2 * atr[e.at] }));
+    let htf = 0; const Hc = L.aggregate(vis, HTF_SEC[HTF[R.tf]]).slice(0, -1);
+    if (Hc.length >= 12) htf = L.marketStructure(Hc, L.findSwings(Hc, 2)).trend;
+    const Hh = ms.lastH ? ms.lastH.p : null, Ll = ms.lastL ? ms.lastL.p : null, px = vis[n - 1].c;
+    const pos = Hh != null && Ll != null && Hh > Ll ? (px - Ll) / (Hh - Ll) : null;
+    let leg = null; const hs = sw.hs, ls = sw.ls; // dernière jambe d'impulsion (Fibonacci automatique)
+    if (hs.length && ls.length) {
+      const h = hs[hs.length - 1], l = ls[ls.length - 1];
+      if (ms.trend === 1 || (ms.trend === 0 && h.i > l.i)) { const l0 = ls.filter(x => x.i < h.i).pop(); if (l0) leg = { t1: l0.t, p1: l0.p, t2: h.t, p2: h.p, i1: l0.i, i2: h.i, dir: 1 }; }
+      else { const h0 = hs.filter(x => x.i < l.i).pop(); if (h0) leg = { t1: h0.t, p1: h0.p, t2: l.t, p2: l.p, i1: h0.i, i2: l.i, dir: -1 }; }
+    }
+    return { swings, obs, fvgs, events, trend: ms.trend, lastEv: ms.events[ms.events.length - 1] || null, htf, atr: atr[n - 1], pos, Hh, Ll, px, sw, from, leg };
   }
   const trendTxt = t => t === 1 ? 'haussière' : t === -1 ? 'baissière' : 'sans direction claire (range)';
   function explainTrend(fx) {
-    const hs = fx.swings.filter(s => s.hi).slice(-2), ls = fx.swings.filter(s => !s.hi).slice(-2);
-    const parts = [];
+    const hs = fx.swings.filter(s => s.hi).slice(-2), ls = fx.swings.filter(s => !s.hi).slice(-2), parts = [];
     if (hs.length === 2) parts.push(`sommets ${hs[1].p > hs[0].p ? 'croissants' : 'décroissants'} (${fp(hs[0].p)} → ${fp(hs[1].p)}, ${hs[1].label})`);
     if (ls.length === 2) parts.push(`creux ${ls[1].p > ls[0].p ? 'croissants' : 'décroissants'} (${fp(ls[0].p)} → ${fp(ls[1].p)}, ${ls[1].label})`);
-    const ev = fx.lastEv ? `Dernier événement : ${fx.lastEv.kind} ${fx.lastEv.dir === 1 ? 'haussier' : 'baissier'} qui a clôturé au-delà de ${fp(fx.lastEv.level)} le ${fT(fx.lastEv.t)}.` : '';
+    const ev = fx.lastEv ? `Dernier événement : ${fx.lastEv.kind} ${fx.lastEv.dir === 1 ? 'haussier' : 'baissier'} clôturé au-delà de ${fp(fx.lastEv.level)} le ${fT(fx.lastEv.t)}.` : '';
     return `La tendance ${R.tf} est ${trendTxt(fx.trend)} : ${parts.join(' et ') || 'pas assez de swings visibles'}. ${ev} Sur l'UT supérieure (${HTF[R.tf]}), elle est ${trendTxt(fx.htf)}.`;
   }
+  function checkSwing(d) {
+    const fx = teacherView(), real = fx.sw[d.hi ? 'hs' : 'ls'].find(s => Math.abs(s.i - d.i) <= 2);
+    const prev = R.draws.filter(x => x.type === 'sw' && x.hi === d.hi && x.t < d.t).sort((a, b) => a.t - b.t).pop();
+    const ref = prev ? prev.p : (fx.sw[d.hi ? 'hs' : 'ls'].filter(s => s.i < d.i - 2).pop() || {}).p;
+    const want = ref == null ? null : d.hi ? (d.p > ref ? 'HH' : 'LH') : (d.p > ref ? 'HL' : 'LL');
+    if (!real) say(`Ce point n'est pas un vrai ${d.hi ? 'sommet' : 'creux'} : un swing ${d.hi ? 'haut' : 'bas'} a des bougies ${d.hi ? 'plus basses' : 'plus hautes'} de chaque côté.`, 'warn');
+    else if (want && want !== d.lab) say(`Tu as marqué ${d.lab}, mais ce ${d.hi ? 'sommet' : 'creux'} (${fp(d.p)}) est ${d.p > ref ? 'plus haut' : 'plus bas'} que le précédent (${fp(ref)}) : c'est un <b>${want}</b>.`, 'ko');
+    else if (want) say(`${d.lab} correct (${fp(d.p)} ${d.p > ref ? '>' : '<'} ${fp(ref)}).`, 'ok');
+    if (R.draws.filter(x => x.type === 'sw').length === 4) say('Avec deux sommets et deux creux, la structure apparaît : HH + HL = tendance haussière, LH + LL = baissière. Déclare la tendance à droite.', 'tip');
+  }
   function quickOB(d) {
-    const fx = teacherView(), k = R.all[d.i], match = fx.obs.find(o => Math.abs(o.i - d.i) <= 1);
-    const after = R.all.slice(d.i + 1, R.cur), broken = after.some(x => d.dir === 1 ? x.c < d.bot : x.c > d.top);
-    if (broken) say(`Cet OB a déjà été cassé (une bougie a clôturé ${d.dir === 1 ? 'sous' : 'au-dessus de'} la zone) : il n'est plus valable. Un OB doit être intact.`, 'warn');
-    else if (match) say(`Bon OB ${match.dir === 1 ? 'haussier' : 'baissier'} : c'est bien la dernière bougie ${match.dir === 1 ? 'baissière' : 'haussière'} avant le mouvement qui a cassé la structure. Zone ${fp(match.bot)} – ${fp(match.top)}.`, 'ok');
-    else {
-      const any = fx.obs.filter(o => o.dir === d.dir).pop();
-      say(`Je ne valide pas cet OB : un OB est la dernière bougie ${d.dir === 1 ? 'baissière avant une impulsion haussière' : 'haussière avant une impulsion baissière'} qui casse un sommet/creux (BOS ou CHoCH). ${any ? `Regarde plutôt la zone ${fp(any.bot)} – ${fp(any.top)} (bougie du ${fT(any.t)}).` : 'Aucun OB intact de ce sens dans la zone récente.'}`, 'warn');
-    }
-    void k;
+    const fx = teacherView(), match = fx.obs.find(o => Math.abs(o.i - d.i) <= 1);
+    const broken = R.all.slice(d.i + 1, R.cur).some(x => d.dir === 1 ? x.c < d.bot : x.c > d.top);
+    if (broken) say(`Cet OB a déjà été cassé (clôture ${d.dir === 1 ? 'sous' : 'au-dessus de'} la zone) : il n'est plus valable.`, 'warn');
+    else if (match) say(`Bon OB ${match.dir === 1 ? 'haussier' : 'baissier'} : dernière bougie ${match.dir === 1 ? 'baissière' : 'haussière'} avant l'impulsion qui a cassé la structure. Zone ${fp(match.bot)} – ${fp(match.top)}.`, 'ok');
+    else { const any = fx.obs.filter(o => o.dir === d.dir).pop();
+      say(`Je ne valide pas cet OB : c'est la dernière bougie ${d.dir === 1 ? 'baissière avant une impulsion haussière' : 'haussière avant une impulsion baissière'} qui casse un sommet / creux (BOS ou CHoCH). ${any ? `Regarde plutôt ${fp(any.bot)} – ${fp(any.top)} (${fT(any.t)}).` : 'Aucun OB intact de ce sens dans la zone récente.'}`, 'warn'); }
   }
   function quickFVG(d) {
     const filled = R.all.slice(d.i + 2, R.cur).some(x => d.dir === 1 ? x.l <= d.bot : x.h >= d.top);
-    say(filled ? `FVG ${d.dir === 1 ? 'haussier' : 'baissier'} correct, mais il a déjà été comblé : il a perdu l'essentiel de son intérêt.`
-      : `FVG ${d.dir === 1 ? 'haussier' : 'baissier'} correct (${fp(d.bot)} – ${fp(d.top)}) et encore ouvert : le prix peut revenir le combler.${d.dir === 1 ? ' C\'est une zone d\'achat si la tendance est haussière.' : ' C\'est une zone de vente si la tendance est baissière.'}`, filled ? 'warn' : 'ok');
+    say(filled ? `FVG ${d.dir === 1 ? 'haussier' : 'baissier'} correct, mais déjà comblé : il a perdu l'essentiel de son intérêt.`
+      : `FVG ${d.dir === 1 ? 'haussier' : 'baissier'} correct (${fp(d.bot)} – ${fp(d.top)}) et encore ouvert : zone ${d.dir === 1 ? 'd\'achat' : 'de vente'} si la tendance va dans ce sens.`, filled ? 'warn' : 'ok');
+  }
+  function markMSS(i) {
+    const L = lib(), vis = visible(), atr = L.atrArr(vis), ms = L.marketStructure(vis, L.findSwings(vis, 2));
+    const e = ms.events.filter(x => Math.abs(x.at - i) <= 1).pop();
+    if (!e) { R.draws.push({ type: 'mss', t1: R.all[Math.max(0, i - 6)].t, t2: R.all[i].t, p1: R.all[i].c, dir: R.all[i].c >= R.all[i].o ? 1 : -1, ok: false });
+      say('Aucune cassure de structure à cette bougie : un MSS est une clôture au-delà du dernier sommet (ou creux) qui inverse la tendance.', 'ko'); return; }
+    const body = Math.abs(vis[e.at].c - vis[e.at].o), disp = body >= 1.2 * atr[e.at], ok = e.kind === 'CHoCH' && disp;
+    R.draws.push({ type: 'mss', t1: e.tFrom, t2: e.t, p1: e.level, dir: e.dir, ok });
+    if (ok) say(`MSS ${e.dir === 1 ? 'haussier' : 'baissier'} valide : la bougie casse ${e.dir === 1 ? 'le dernier sommet' : 'le dernier creux'} (${fp(e.level)}) contre l'ancienne tendance, avec un déplacement (corps ${(body / atr[e.at]).toFixed(1)} × ATR). Cherche maintenant un retour sur l'OB / FVG laissé par ce mouvement, idéalement dans l'OTE du Fibonacci.`, 'ok');
+    else if (e.kind === 'CHoCH') say(`C'est bien un changement de structure (CHoCH), mais sans déplacement (corps ${(body / atr[e.at]).toFixed(1)} × ATR, il faut au moins 1,2) : MSS faible, prudence.`, 'warn');
+    else say('C\'est un BOS (cassure dans le sens de la tendance), pas un MSS : un MSS casse la structure <b>contraire</b>.', 'ko');
+  }
+  function checkFib(d) {
+    const fx = teacherView(), leg = fx.leg, i1 = logicalOf(d.t1), i2 = logicalOf(d.t2), up = d.p2 > d.p1;
+    if (!leg) { say('Fibonacci tracé. Mesure toujours la dernière jambe d\'impulsion : du creux au sommet en tendance haussière, du sommet au creux en baissière.', 'info'); return; }
+    const okA = Math.abs(i1 - leg.i1) <= 2 && Math.abs(d.p1 - leg.p1) <= fx.atr * 0.5, okB = Math.abs(i2 - leg.i2) <= 2 && Math.abs(d.p2 - leg.p2) <= fx.atr * 0.5;
+    const ote = `${fp(Math.min(leg.p2 - (leg.p2 - leg.p1) * 0.79, leg.p2 - (leg.p2 - leg.p1) * 0.62))} – ${fp(Math.max(leg.p2 - (leg.p2 - leg.p1) * 0.79, leg.p2 - (leg.p2 - leg.p1) * 0.62))}`;
+    if (okA && okB) say(`Fibonacci bien placé sur la dernière jambe ${leg.dir === 1 ? 'haussière' : 'baissière'} (${fp(leg.p1)} → ${fp(leg.p2)}). Zone OTE 62–79 % : ${ote}.`, 'ok');
+    else if ((leg.dir === 1) !== up) say(`Fibonacci tracé dans le mauvais sens : en tendance ${leg.dir === 1 ? 'haussière, du creux vers le sommet' : 'baissière, du sommet vers le creux'}. La dernière jambe va de ${fp(leg.p1)} à ${fp(leg.p2)}.`, 'ko');
+    else say(`Bon sens, mais pas sur les bons points. La dernière jambe va de ${fp(leg.p1)} (${fT(leg.t1)}) à ${fp(leg.p2)} (${fT(leg.t2)}) : accroche le Fibonacci sur les mèches de ces swings (bouton « Fibo auto » pour comparer).`, 'warn');
+  }
+  function autoFib() {
+    if (!R.cur) return; const fx = teacherView(), leg = fx.leg;
+    if (!leg) { say('Pas encore assez de swings visibles pour tracer un Fibonacci automatique.', 'warn'); return; }
+    R.draws = R.draws.filter(d => !(d.type === 'fib' && d.auto)); R.draws.push(Object.assign({ type: 'fib', auto: true, tf: R.tf }, leg));
+    const span = leg.p2 - leg.p1, o1 = leg.p2 - span * 0.62, o2 = leg.p2 - span * 0.79, eq = leg.p2 - span * 0.5;
+    const inOte = fx.px <= Math.max(o1, o2) && fx.px >= Math.min(o1, o2);
+    say(`<b>Fibonacci automatique</b> sur la dernière jambe ${leg.dir === 1 ? 'haussière' : 'baissière'} : ${fp(leg.p1)} → ${fp(leg.p2)}. Équilibre 50 % = ${fp(eq)}. OTE 62–79 % = ${fp(Math.min(o1, o2))} – ${fp(Math.max(o1, o2))}${inOte ? ' : <b>le prix y est maintenant</b>, cherche une confirmation (MSS ou bougie de rejet).' : ' : attends que le prix y revienne.'} Cibles d'extension : ${fp(leg.p2 + span * 0.272)} et ${fp(leg.p2 + span * 0.618)}.`, 'tip');
+    requestAnimationFrame(drawOverlay);
   }
   function reviewAnalysis(silent) {
-    const fx = teacherView(), notes = [], miss = [];
-    // 1. structure (25)
-    const majors = fx.swings.slice(-8), marks = R.draws.filter(d => (d.type === 'hi' || d.type === 'lo') && d.tf === R.tf);
-    const found = majors.filter(s => marks.some(m => (m.type === 'hi') === s.hi && Math.abs(logicalOf(m.t) - s.i) <= 2));
-    const extra = marks.filter(m => !fx.swings.some(s => (m.type === 'hi') === s.hi && Math.abs(logicalOf(m.t) - s.i) <= 2) && logicalOf(m.t) >= fx.from);
-    let sStruct = majors.length ? Math.round(25 * found.length / majors.length) - Math.min(8, extra.length * 2) : 0; sStruct = Math.max(0, sStruct);
-    if (!marks.length) notes.push(['ko', 'Structure', 'Tu n\'as marqué aucun plus haut / plus bas. Commence toujours par là : c\'est la base de toute lecture de tendance.']);
+    const fx = teacherView(), notes = [];
+    const majors = fx.swings.slice(-8), marks = R.draws.filter(d => d.type === 'sw' && d.tf === R.tf);
+    const near = m => fx.swings.find(s => m.hi === s.hi && Math.abs(logicalOf(m.t) - s.i) <= 2);
+    const found = majors.filter(s => marks.some(m => m.hi === s.hi && Math.abs(logicalOf(m.t) - s.i) <= 2));
+    const goodLab = marks.filter(m => { const s = near(m); return s && (s.label === m.lab || s.label.length === 1); }).length;
+    const extra = marks.filter(m => !near(m) && logicalOf(m.t) >= fx.from);
+    const sStruct = Math.max(0, Math.min(25, majors.length ? Math.round(18 * found.length / majors.length + (marks.length ? 7 * goodLab / marks.length : 0)) - Math.min(8, extra.length * 2) : 0));
+    if (!marks.length) notes.push(['ko', 'Structure', 'Aucun HH / HL / LH / LL marqué. Commence toujours par la structure : c\'est la base de la lecture SMC.']);
     else {
-      notes.push([found.length >= majors.length * 0.6 ? 'ok' : 'warn', 'Structure', `Tu as trouvé ${found.length} des ${majors.length} sommets/creux importants récents${extra.length ? `, et ${extra.length} marque(s) ne correspondent pas à un vrai swing (il faut des bougies plus basses de chaque côté pour un sommet)` : ''}.`]);
-      majors.filter(s => !found.includes(s)).slice(-3).forEach(s => miss.push(`${s.hi ? 'sommet' : 'creux'} ${s.label} à ${fp(s.p)} (${fT(s.t)})`));
-      if (miss.length) notes.push(['info', 'Oubliés', miss.join(' · ') + '. Active « Correction » pour les voir.']);
+      notes.push([found.length >= majors.length * 0.6 ? 'ok' : 'warn', 'Structure', `${found.length} des ${majors.length} swings importants trouvés, ${goodLab} étiquette(s) juste(s) sur ${marks.length}${extra.length ? `, ${extra.length} point(s) qui ne sont pas de vrais swings` : ''}.`]);
+      const miss = majors.filter(s => !found.includes(s)).slice(-3).map(s => `${s.label} à ${fp(s.p)} (${fT(s.t)})`);
+      if (miss.length) notes.push(['info', 'Oubliés', miss.join(' · ') + '. Coche « Correction » pour les voir.']);
     }
-    // 2. tendance (15)
     let sTrend = 0;
-    if (R.trend == null) notes.push(['ko', 'Tendance', 'Tu n\'as pas déclaré la tendance. ' + explainTrend(fx)]);
+    if (R.trend == null) notes.push(['ko', 'Tendance', 'Tendance non déclarée. ' + explainTrend(fx)]);
     else if (R.trend === fx.trend) { sTrend = 15; notes.push(['ok', 'Tendance', 'Exact. ' + explainTrend(fx)]); }
     else notes.push(['ko', 'Tendance', `Tu as indiqué une tendance ${trendTxt(R.trend)}. ${explainTrend(fx)}`]);
-    // 3. zones (20)
     const zones = R.draws.filter(d => (d.type === 'ob' || d.type === 'fvg') && d.tf === R.tf);
     let good = 0;
-    zones.forEach(z => {
-      const broken = R.all.slice(z.i + 1, R.cur).some(x => z.dir === 1 ? x.c < z.bot : x.c > z.top);
-      const ok = z.type === 'fvg' ? !broken : fx.obs.some(o => Math.abs(o.i - z.i) <= 1);
-      if (ok && !broken) good++;
-    });
-    const sZones = zones.length ? Math.round(20 * good / zones.length) : 0;
-    notes.push([zones.length ? (good === zones.length ? 'ok' : 'warn') : 'ko', 'Zones', zones.length ? `${good} zone(s) valable(s) sur ${zones.length} tracée(s).${fx.obs.length || fx.fvgs.length ? ` Le bot voit ${fx.obs.length} OB et ${fx.fvgs.length} FVG intacts dans la zone récente.` : ''}` : 'Aucun OB ni FVG tracé : sans zone, on ne sait pas où entrer.']);
+    zones.forEach(z => { const broken = R.all.slice(z.i + 1, R.cur).some(x => z.dir === 1 ? x.c < z.bot : x.c > z.top); const ok = z.type === 'fvg' || fx.obs.some(o => Math.abs(o.i - z.i) <= 1); if (ok && !broken) good++; });
+    const hasMss = R.draws.some(d => d.type === 'mss' && d.ok), hasFib = R.draws.some(d => d.type === 'fib');
+    const sZones = Math.min(20, (zones.length ? Math.round(16 * good / zones.length) : 0) + (hasMss ? 2 : 0) + (hasFib ? 2 : 0));
+    notes.push([zones.length ? (good === zones.length ? 'ok' : 'warn') : 'ko', 'Zones', zones.length ? `${good} zone(s) valable(s) sur ${zones.length}. Le bot voit ${fx.obs.length} OB et ${fx.fvgs.length} FVG intacts.${hasMss || hasFib ? ' Bonus : ' + [hasMss ? 'MSS identifié' : '', hasFib ? 'Fibonacci tracé' : ''].filter(Boolean).join(', ') + '.' : ''}` : 'Aucun OB ni FVG tracé : sans zone, on ne sait pas où entrer.']);
     const res = { fx, notes, sStruct, sTrend, sZones };
-    if (!silent) { notes.forEach(n => say(`<b>${n[1]}</b> — ${n[2]}`, n[0])); say(`Score d'analyse : <b>${sStruct + sTrend + sZones} / 60</b> (structure ${sStruct}/25, tendance ${sTrend}/15, zones ${sZones}/20). La décision de trade compte pour les 40 points restants.`, 'score'); }
+    if (!silent) { notes.forEach(n => say(`<b>${n[1]}</b> — ${n[2]}`, n[0])); say(`Score d'analyse : <b>${sStruct + sTrend + sZones} / 60</b> (structure ${sStruct}/25, tendance ${sTrend}/15, zones ${sZones}/20). La décision compte pour les 40 points restants.`, 'score'); }
     return res;
   }
   function reviewDecision(t) {
     const an = reviewAnalysis(true), fx = an.fx, out = [];
     let sDir = 0, sLoc = 0, sSL = 0, sRR = 0, sKZ = 0;
-    if (fx.trend === t.dir) { sDir = 10; out.push(['ok', 'Sens', `Tu trades dans le sens de la tendance ${trendTxt(fx.trend)}.`]); }
-    else out.push(['ko', 'Sens', `Tu ${t.dir === 1 ? 'achètes' : 'vends'} alors que la tendance ${R.tf} est ${trendTxt(fx.trend)}. Trader contre la structure demande une raison très forte (CHoCH confirmé).`]);
+    if (fx.trend === t.dir) { sDir = 10; out.push(['ok', 'Sens', `Dans le sens de la tendance ${trendTxt(fx.trend)}.`]); }
+    else out.push(['ko', 'Sens', `Tu ${t.dir === 1 ? 'achètes' : 'vends'} alors que la tendance ${R.tf} est ${trendTxt(fx.trend)}. Trader contre la structure demande un MSS confirmé.`]);
     if (fx.htf && fx.htf !== t.dir) out.push(['warn', 'UT supérieure', `L'UT ${HTF[R.tf]} est ${trendTxt(fx.htf)} : ton trade va contre elle.`]);
-    if (fx.pos != null) { const okLoc = t.dir === 1 ? fx.pos < 0.5 : fx.pos > 0.5; if (okLoc) sLoc = 10;
-      out.push([okLoc ? 'ok' : 'ko', 'Emplacement', `Prix à ${Math.round(fx.pos * 100)} % du range (${fp(fx.Ll)} – ${fp(fx.Hh)}) : ${fx.pos < 0.5 ? 'discount' : 'premium'}. ${okLoc ? 'Bon côté pour ce trade.' : (t.dir === 1 ? 'Acheter en premium, c\'est acheter cher.' : 'Vendre en discount, c\'est vendre bon marché.')}`]); }
+    if (fx.pos != null) { const ok = t.dir === 1 ? fx.pos < 0.5 : fx.pos > 0.5; if (ok) sLoc += 6;
+      out.push([ok ? 'ok' : 'ko', 'Premium / discount', `Prix à ${Math.round(fx.pos * 100)} % du range (${fp(fx.Ll)} – ${fp(fx.Hh)}) : ${fx.pos < 0.5 ? 'discount' : 'premium'}. ${ok ? 'Bon côté pour ce trade.' : (t.dir === 1 ? 'Acheter en premium, c\'est acheter cher.' : 'Vendre en discount, c\'est vendre bon marché.')}`]); }
     const zones = R.draws.filter(d => d.type === 'ob' || d.type === 'fvg').concat(fx.obs.map(o => Object.assign({ type: 'ob' }, o)), fx.fvgs.map(f => Object.assign({ type: 'fvg' }, f)));
     const inZone = zones.some(z => z.dir === t.dir && t.entry <= z.top + fx.atr * 0.3 && t.entry >= z.bot - fx.atr * 0.3);
-    if (inZone) { sLoc = Math.min(10, sLoc + 0); out.push(['ok', 'Zone', 'L\'entrée se fait dans ou près d\'une zone (OB / FVG) du bon sens.']); }
-    else out.push(['warn', 'Zone', 'L\'entrée n\'est pas sur un OB ou un FVG : tu entres « au milieu de nulle part ».']);
+    const fibs = R.draws.filter(d => d.type === 'fib').concat(fx.leg ? [fx.leg] : []);
+    const inOte = fibs.some(f => { const s = f.p2 - f.p1, a = f.p2 - s * 0.62, b = f.p2 - s * 0.79; return t.entry >= Math.min(a, b) && t.entry <= Math.max(a, b) && (s > 0) === (t.dir === 1); });
+    if (inZone || inOte) { sLoc += 4; out.push(['ok', 'Zone d\'entrée', `Entrée ${[inZone ? 'sur un OB / FVG' : '', inOte ? 'dans l\'OTE du Fibonacci' : ''].filter(Boolean).join(' et ')} du bon sens.`]); }
+    else out.push(['warn', 'Zone d\'entrée', 'Entrée ni sur un OB / FVG ni dans l\'OTE (62–79 %) : tu entres « au milieu de nulle part ».']);
     const ref = t.dir === 1 ? fx.sw.ls.filter(s => s.i < R.cur).pop() : fx.sw.hs.filter(s => s.i < R.cur).pop();
-    const slBeyond = ref ? (t.dir === 1 ? t.sl < ref.p : t.sl > ref.p) : false;
-    const slDist = Math.abs(t.entry - t.sl) / fx.atr;
-    if (slBeyond && slDist <= 4) { sSL = 8; out.push(['ok', 'Stop', `Stop au-delà du dernier ${t.dir === 1 ? 'creux' : 'sommet'} (${fp(ref.p)}) : protégé par la structure.`]); }
+    const slBeyond = ref ? (t.dir === 1 ? t.sl < ref.p : t.sl > ref.p) : false, slDist = Math.abs(t.entry - t.sl) / fx.atr;
+    if (slBeyond && slDist <= 4) { sSL = 8; out.push(['ok', 'Stop', `Stop au-delà du dernier ${t.dir === 1 ? 'creux' : 'sommet'} (${fp(ref.p)}).`]); }
     else if (slDist < 0.4) out.push(['ko', 'Stop', `Stop très serré (${slDist.toFixed(1)} ATR) : le moindre bruit le touchera.`]);
-    else out.push(['warn', 'Stop', ref ? `Le stop n'est pas au-delà du dernier ${t.dir === 1 ? 'creux' : 'sommet'} (${fp(ref.p)}) : un sweep peut te sortir avant le vrai mouvement.` : 'Stop placé sans repère de structure.']);
+    else out.push(['warn', 'Stop', ref ? `Stop pas au-delà du dernier ${t.dir === 1 ? 'creux' : 'sommet'} (${fp(ref.p)}) : un sweep peut te sortir.` : 'Stop sans repère de structure.']);
     const rr = Math.abs(t.tp - t.entry) / Math.abs(t.entry - t.sl);
-    if (rr >= 2) { sRR = 7; out.push(['ok', 'Risque / rendement', `R:R de 1:${rr.toFixed(1)} : une perte est compensée par la moitié d'un gain.`]); }
-    else out.push([rr >= 1.5 ? 'warn' : 'ko', 'Risque / rendement', `R:R de 1:${rr.toFixed(1)}. Vise au moins 1:2 : avec 1:1, il faut gagner plus d'un trade sur deux juste pour couvrir les coûts.`]);
-    const kz = window.AT && window.AT.killZone ? window.AT.killZone(cursorTime()) : null;
-    if (kz === 'Londres' || kz === 'New York AM') { sKZ = 5; out.push(['ok', 'Horaire', `Entrée pendant la kill zone ${kz} : volumes institutionnels présents.`]); }
-    else out.push(['warn', 'Horaire', `Entrée ${kz ? 'en session ' + kz : 'hors session'} (heure de New York ${fT(cursorTime()).split(' ').pop()}) : en dehors de Londres / New York AM, les mouvements sont moins fiables.`]);
-    const decision = sDir + sLoc + sSL + sRR + sKZ, total = an.sStruct + an.sTrend + an.sZones + decision;
-    return { notes: an.notes.concat(out), total, analysis: an.sStruct + an.sTrend + an.sZones, decision, rr, errors: out.filter(o => o[0] === 'ko').map(o => o[1]).concat(an.notes.filter(o => o[0] === 'ko').map(o => o[1])) };
+    if (rr >= 2) { sRR = 7; out.push(['ok', 'Risque / rendement', `R:R 1:${rr.toFixed(1)}.`]); } else out.push([rr >= 1.5 ? 'warn' : 'ko', 'Risque / rendement', `R:R 1:${rr.toFixed(1)} : vise au moins 1:2.`]);
+    if (t.pct > 2) out.push(['ko', 'Risque', `${String(t.pct).replace('.', ',')} % du capital : au-delà de 2 %, une série de pertes devient dangereuse.`]);
+    const kz = sessionOf(cursorTime());
+    if (kz === 'Londres' || kz === 'New York AM') { sKZ = 5; out.push(['ok', 'Session', `Entrée pendant la kill zone ${kz}.`]); }
+    else out.push(['warn', 'Session', `Entrée ${kz ? 'en session ' + kz : 'hors kill zone'} : en dehors de Londres / New York AM, les mouvements sont moins fiables.`]);
+    const decision = sDir + sLoc + sSL + sRR + sKZ;
+    return { notes: an.notes.concat(out), total: an.sStruct + an.sTrend + an.sZones + decision, analysis: an.sStruct + an.sTrend + an.sZones, decision, rr,
+      errors: out.filter(o => o[0] === 'ko').map(o => o[1]).concat(an.notes.filter(o => o[0] === 'ko').map(o => o[1])) };
   }
-  function say(html, kind) { R.msgs.push({ html, kind: kind || 'info', t: Date.now() }); if (R.msgs.length > 60) R.msgs.shift(); renderMsgs(); }
+  function say(html, kind) { R.msgs.push({ html, kind: kind || 'info' }); if (R.msgs.length > 80) R.msgs.shift(); renderMsgs(); }
 
-  /* ---------------- trade ---------------- */
-  function sizing(entry, sl) { const bal = (window.AT && window.AT.snapshot && window.AT.snapshot()) ? window.AT.snapshot().risk.balance : 10000;
-    const pct = R.trade ? R.trade.pct : 1, risk = bal * pct / 100, units = risk / Math.max(1e-9, Math.abs(entry - sl));
-    return { risk, label: R.sym === 'XAU/USD' ? `${fmt(units / 100, 2)} lot` : `${fmt(units, 4)} BTC` }; }
+  /* ---------------- lecture ---------------- */
+  const path = k => k.c >= k.o ? [k.o, k.l, k.h, k.c] : [k.o, k.h, k.l, k.c];
+  function stepSub() {
+    if (R.cur >= R.all.length) { stop(); say('Fin de la période : tu es arrivé au bout des données. Choisis une autre semaine pour continuer.', 'info'); return false; }
+    const k = R.all[R.cur], i = R.sub, px = path(k)[i], prev = R.live ? R.live.c : k.o;
+    if (i === 0) R.live = { t: k.t, o: k.o, h: k.o, l: k.o, c: k.o };
+    R.live.c = px; R.live.h = Math.max(R.live.h, px); R.live.l = Math.min(R.live.l, px);
+    series.update({ time: k.t, open: R.live.o, high: R.live.h, low: R.live.l, close: R.live.c });
+    for (const t of R.trades) if (t.open) checkTrade(t, prev, px, k.t);
+    if (++R.sub >= 4) { R.sub = 0; R.live = null; R.cur++; onCandleClosed(); }
+    return true;
+  }
+  function play() {
+    if (R.playing || R.loading || !R.all.length) return; R.playing = true; R.acc = 0;
+    R.timer = setInterval(() => { R.acc += R.speed * 4 * 40 / 1000; let n = Math.floor(R.acc); R.acc -= n;
+      while (n-- > 0 && R.playing) if (!stepSub()) break; requestAnimationFrame(drawOverlay); renderStatus(); renderPositions(); }, 40);
+    renderControls();
+  }
+  function stop() { R.playing = false; if (R.timer) clearInterval(R.timer); R.timer = null; renderControls(); }
+  function stepCandle() { do { if (!stepSub()) break; } while (R.sub !== 0); requestAnimationFrame(drawOverlay); renderStatus(); renderPositions(); }
+  function onCandleClosed() {
+    for (const t of R.trades.filter(x => x.open)) {
+      const r = (R.all[R.cur - 1].c - t.entry) * t.dir / t.risk0;
+      if (!t.hint1 && r >= 1) { t.hint1 = true; say(`Trade n°${t.id} à +1R : le plan dit stop au point d'entrée (glisse la ligne SL sur l'entrée, ou bouton « Stop au break-even »).`, 'tip'); }
+      if (!t.hintS) { const L = lib(), vis = visible(), ms = L.marketStructure(vis, L.findSwings(vis, 3)), e = ms.events[ms.events.length - 1];
+        if (e && e.at === R.cur - 1 && e.dir === -t.dir) { t.hintS = true; say(`Trade n°${t.id} : ${e.kind} ${e.dir === 1 ? 'haussier' : 'baissier'} contre ta position à ${fp(e.level)}. La raison du trade s'affaiblit.`, 'warn'); } }
+    }
+    const s = sessionOf(cursorTime()), prevS = R.lastSess; R.lastSess = s;
+    if (s && s !== prevS && (s === 'Londres' || s === 'New York AM') && R.playing) say(`Ouverture de la kill zone <b>${s}</b> (${DAYF.format(new Date(cursorTime() * 1000))}) : surveille tes zones.`, 'info');
+  }
+
+  /* ---------------- ordres et positions ---------------- */
+  const riskNow = t => t.units * Math.abs(t.entry - t.sl);
+  function sizeFor(entry, sl, pct) { const risk = R.balance * pct / 100, units = risk / Math.max(1e-12, Math.abs(entry - sl)), c = SYM[R.sym].contract;
+    return { risk, units, label: c > 1 ? `${fmt(units / c, 2)} ${SYM[R.sym].unit}` : `${fmt(units, units < 10 ? 4 : 2)} ${SYM[R.sym].unit}` }; }
   function newTicket(dir) {
-    if (R.trade && R.trade.open) { say('Tu as déjà une position ouverte : gère-la avant d\'en prendre une autre.', 'warn'); return; }
+    if (!R.cur) return;
+    if (R.trades.filter(t => t.open).length >= MAX_OPEN) { say(`Maximum ${MAX_OPEN} positions ouvertes en même temps.`, 'warn'); return; }
     stop();
-    const vis = visible(), px = vis[vis.length - 1].c, fx = teacherView();
-    const ref = dir === 1 ? fx.sw.ls.filter(s => s.i < R.cur).pop() : fx.sw.hs.filter(s => s.i < R.cur).pop();
+    const px = lastPx(), fx = teacherView(), ref = dir === 1 ? fx.sw.ls.filter(s => s.i < R.cur).pop() : fx.sw.hs.filter(s => s.i < R.cur).pop();
     let sl = ref ? ref.p - dir * fx.atr * 0.2 : px - dir * fx.atr * 1.5; if ((px - sl) * dir <= fx.atr * 0.3) sl = px - dir * fx.atr * 1.2;
-    R.trade = { dir, entry: px, sl, tp: px + dir * 2 * Math.abs(px - sl), pct: 1, open: false };
-    renderTicket(); tradeLines();
+    R.ticket = { dir, entry: px, sl, tp: px + dir * 2 * Math.abs(px - sl), pct: lsGet('at:rp:pct', 1) };
+    say('Ordre en préparation : <b>maintiens et fais glisser</b> les lignes SL (rouge) et TP (vert) sur le graphique, règle le risque, puis valide.', 'info');
+    renderTicket(); priceLines(); requestAnimationFrame(drawOverlay);
   }
   function validate() {
-    const t = R.trade; if (!t || t.open) return;
-    if ((t.entry - t.sl) * t.dir <= 0) { say('Le stop doit être sous le prix pour un achat, au-dessus pour une vente.', 'ko'); return; }
-    if ((t.tp - t.entry) * t.dir <= 0) { say('L\'objectif doit être au-dessus du prix pour un achat, en dessous pour une vente.', 'ko'); return; }
-    t.open = true; t.risk = Math.abs(t.entry - t.sl); t.t0 = cursorTime(); t.i0 = R.cur; t.be = false;
-    t.review = reviewDecision(t);
-    addMark({ time: R.all[R.cur - 1].t, position: t.dir === 1 ? 'belowBar' : 'aboveBar', shape: t.dir === 1 ? 'arrowUp' : 'arrowDown', color: css('accent'), text: t.dir === 1 ? 'Achat' : 'Vente' });
-    say(`<b>Ordre ${t.dir === 1 ? 'ACHAT' : 'VENTE'} validé</b> à ${fp(t.entry)} · stop ${fp(t.sl)} · objectif ${fp(t.tp)} · R:R 1:${t.review.rr.toFixed(1)}. Voici mon avis avant que le marché reparte :`, 'info');
+    const k = R.ticket; if (!k) return;
+    if ((k.entry - k.sl) * k.dir <= 0) { say('Le stop doit être sous le prix pour un achat, au-dessus pour une vente.', 'ko'); return; }
+    if ((k.tp - k.entry) * k.dir <= 0) { say('L\'objectif doit être au-dessus du prix pour un achat, en dessous pour une vente.', 'ko'); return; }
+    const sz = sizeFor(k.entry, k.sl, k.pct);
+    const t = Object.assign({}, k, { id: ++R.seq, open: true, units: sz.units, risk0: Math.abs(k.entry - k.sl), riskUsd: sz.risk, t0: cursorTime(), i0: R.cur,
+      session: sessionOf(cursorTime()) || 'hors session', day: DAYF.format(new Date(cursorTime() * 1000)) });
+    t.review = reviewDecision(t); R.trades.push(t); R.ticket = null;
+    addMark({ time: R.all[R.cur - 1].t, position: t.dir === 1 ? 'belowBar' : 'aboveBar', shape: t.dir === 1 ? 'arrowUp' : 'arrowDown', color: css('accent'), text: `#${t.id} ${t.dir === 1 ? 'Achat' : 'Vente'}` });
+    say(`<b>Trade n°${t.id} : ${t.dir === 1 ? 'ACHAT' : 'VENTE'}</b> à ${fp(t.entry)} · stop ${fp(t.sl)} · objectif ${fp(t.tp)} · R:R 1:${t.review.rr.toFixed(1)} · risque ${String(t.pct).replace('.', ',')} % (${fmt(sz.risk, 0)} $) · ${t.day}, session ${t.session}.`, 'info');
     t.review.notes.forEach(n => say(`<b>${n[1]}</b> — ${n[2]}`, n[0]));
-    say(`Note de la séance : <b>${t.review.total} / 100</b> (analyse ${t.review.analysis}/60, décision ${t.review.decision}/40). Lance ▶ pour voir le résultat.`, 'score');
-    renderTicket(); tradeLines();
+    say(`Note du trade n°${t.id} : <b>${t.review.total} / 100</b> (analyse ${t.review.analysis}/60, décision ${t.review.decision}/40). ${t.review.total >= 70 ? 'S\'il est gagnant, il comptera pour ta certification.' : 'Même gagnant, il ne comptera pas pour la certification (note < 70).'}`, 'score');
+    renderTicket(); renderPositions(); priceLines(); requestAnimationFrame(drawOverlay);
   }
-  function checkTrade(p0, p1, t) {
-    const tr = R.trade; if (!tr || !tr.open) return;
-    const lo = Math.min(p0, p1), hi = Math.max(p0, p1);
-    const hitSL = tr.sl >= lo && tr.sl <= hi, hitTP = tr.tp >= lo && tr.tp <= hi;
-    if (hitSL || hitTP) {
-      // ordre de passage sur le segment p0 -> p1
-      const slFirst = hitSL && (!hitTP || Math.abs(tr.sl - p0) <= Math.abs(tr.tp - p0));
-      closeTrade(slFirst ? tr.sl : tr.tp, slFirst ? (tr.be ? 'break-even' : 'stop') : 'objectif', t);
-    }
+  function checkTrade(t, p0, p1, time) {
+    const lo = Math.min(p0, p1), hi = Math.max(p0, p1), hitSL = t.sl >= lo && t.sl <= hi, hitTP = t.tp >= lo && t.tp <= hi;
+    if (hitSL || hitTP) { const slFirst = hitSL && (!hitTP || Math.abs(t.sl - p0) <= Math.abs(t.tp - p0));
+      closeTrade(t, slFirst ? t.sl : t.tp, slFirst ? (Math.abs(t.sl - t.entry) < 1e-12 ? 'break-even' : 'stop') : 'objectif', time); }
   }
-  function closeTrade(px, why, t) {
-    const tr = R.trade; if (!tr || !tr.open) return;
-    tr.open = false; tr.exit = px; tr.why = why; tr.R = (px - tr.entry) * tr.dir / tr.risk; tr.t1 = t || cursorTime();
-    stop();
-    const rec = { d: Date.now(), sym: R.sym, tf: R.tf, dir: tr.dir, entry: tr.entry, exit: px, R: +tr.R.toFixed(2), why, score: tr.review.total, errors: tr.review.errors, bars: R.cur - tr.i0 };
-    addMark({ time: t || R.all[R.cur - 1].t, position: tr.dir === 1 ? 'aboveBar' : 'belowBar', shape: 'circle', color: tr.R >= 0 ? css('bull') : css('bear'), text: `${tr.R >= 0 ? '+' : ''}${tr.R.toFixed(1)}R` });
-    const H = lsGet(HKEY, []); H.push(rec); lsSet(HKEY, H.slice(-200));
-    const good = tr.review.total >= 70;
-    let lesson;
-    if (tr.R > 0 && good) lesson = 'Bon trade et bonne méthode : c\'est exactement ce qu\'il faut répéter.';
-    else if (tr.R > 0) lesson = 'Gagnant, mais la méthode n\'était pas respectée : ne confonds pas chance et compétence. Sur 30 trades, les erreurs se paient.';
-    else if (good) lesson = 'Perdant malgré une bonne analyse : ça arrive, c\'est le coût du métier. Une perte de 1R avec un plan respecté est un « bon » trade.';
-    else lesson = 'Perdant, et la méthode n\'était pas respectée : relis les points en rouge ci-dessus avant la prochaine séance.';
-    say(`<b>Trade clôturé (${why})</b> à ${fp(px)} après ${rec.bars} bougie(s) : <b class="${tr.R >= 0 ? 'up' : 'down'}">${tr.R >= 0 ? '+' : ''}${tr.R.toFixed(2)} R</b>. ${lesson}`, tr.R >= 0 ? 'ok' : 'ko');
-    const fx = teacherView(); say('Ce que le marché a fait ensuite : ' + explainTrend(fx), 'info');
-    renderTicket(); tradeLines(); renderStats();
+  function closeTrade(t, px, why, time) {
+    if (!t.open) return; t.open = false; t.exit = px; t.why = why; t.pnl = (px - t.entry) * t.dir * t.units; t.R = t.pnl / t.riskUsd;
+    R.equity += t.pnl; stop();
+    addMark({ time: time || R.all[R.cur - 1].t, position: t.dir === 1 ? 'aboveBar' : 'belowBar', shape: 'circle', color: t.R >= 0 ? css('bull') : css('bear'), text: `#${t.id} ${t.R >= 0 ? '+' : ''}${t.R.toFixed(1)}R` });
+    const validated = t.R > 0 && t.review.total >= 70 && !t.widened;
+    record({ d: Date.now(), sym: R.sym, tf: R.tf, dir: t.dir, R: +t.R.toFixed(2), pnl: +t.pnl.toFixed(2), why, score: t.review.total, errors: t.review.errors, session: t.session, day: t.day, validated });
+    const good = t.review.total >= 70;
+    const lesson = t.R > 0 && good ? (t.widened ? 'Gagnant, mais tu as éloigné ton stop : trade non validé.' : 'Bon trade, bonne méthode : <b>trade validé</b> pour ta certification.')
+      : t.R > 0 ? 'Gagnant, mais la méthode n\'était pas respectée (note < 70) : chance, pas compétence. Non validé.'
+      : good ? 'Perdant malgré une bonne analyse : c\'est le coût du métier. Une perte de 1R avec un plan respecté reste un « bon » trade.'
+      : 'Perdant et méthode non respectée : relis les points en rouge avant le prochain trade.';
+    say(`<b>Trade n°${t.id} clôturé (${why})</b> à ${fp(px)} : <b class="${t.R >= 0 ? 'up' : 'down'}">${t.R >= 0 ? '+' : ''}${t.R.toFixed(2)} R (${t.pnl >= 0 ? '+' : ''}${fmt(t.pnl, 2)} $)</b>. ${lesson}`, t.R >= 0 ? 'ok' : 'ko');
+    say('Ce que le marché a fait : ' + explainTrend(teacherView()), 'info');
+    renderPositions(); priceLines(); renderStats(); requestAnimationFrame(drawOverlay);
   }
   function addMark(m) { R.marks.push(m); applyMarks(); }
-  function applyMarks() { if (!series) return; const lim = R.cur ? R.all[Math.min(R.cur, R.all.length - 1)].t : 0;
-    series.setMarkers(R.marks.filter(m => m.time <= lim).sort((a, b) => a.time - b.time)); }
-  let plines = [];
-  function tradeLines() {
+  function applyMarks() { if (!series || !R.all.length) return; const lim = R.all[Math.min(R.cur, R.all.length - 1)].t; series.setMarkers(R.marks.filter(m => m.time <= lim).sort((a, b) => a.time - b.time)); }
+  function priceLines() {
     if (!series) return; plines.forEach(l => { try { series.removePriceLine(l); } catch (e) {} }); plines = [];
-    const t = R.trade; if (!t || (t.exit != null && !t.open)) return;
-    const add = (p, c, title) => plines.push(series.createPriceLine({ price: p, color: c, lineWidth: 2, lineStyle: t.open ? 0 : 2, axisLabelVisible: true, title }));
-    add(t.entry, css('accent'), t.dir === 1 ? 'Achat' : 'Vente'); add(t.sl, css('bear'), 'Stop'); add(t.tp, css('bull'), 'Objectif');
+    const add = (p, c, title, style) => plines.push(series.createPriceLine({ price: p, color: c, lineWidth: 2, lineStyle: style, axisLabelVisible: true, title }));
+    for (const t of R.trades.filter(x => x.open)) { add(t.entry, css('accent'), `#${t.id} ${t.dir === 1 ? 'Achat' : 'Vente'}`, 0); add(t.sl, css('bear'), `#${t.id} SL`, 0); add(t.tp, css('bull'), `#${t.id} TP`, 0); }
+    const k = R.ticket; if (k) { add(k.entry, css('accent'), 'Entrée', 2); add(k.sl, css('bear'), 'SL', 2); add(k.tp, css('bull'), 'TP', 2); }
   }
 
-  /* ---------------- suivi de l'élève ---------------- */
-  function stats() {
-    const H = lsGet(HKEY, []), n = H.length; if (!n) return null;
-    const w = H.filter(x => x.R > 0), gp = w.reduce((s, x) => s + x.R, 0), gl = -H.filter(x => x.R <= 0).reduce((s, x) => s + x.R, 0);
-    const errs = {}; H.forEach(x => (x.errors || []).forEach(e => errs[e] = (errs[e] || 0) + 1));
-    const last10 = H.slice(-10), prev10 = H.slice(-20, -10), avg = a => a.length ? a.reduce((s, x) => s + x.score, 0) / a.length : null;
-    return { n, win: w.length / n, pf: gl ? gp / gl : (gp ? Infinity : 0), sumR: gp - gl, exp: (gp - gl) / n, score: avg(H), last: avg(last10), prev: avg(prev10),
-      errs: Object.entries(errs).sort((a, b) => b[1] - a[1]).slice(0, 3), H };
-  }
+  /* ---------------- suivi et certification ---------------- */
+  function emptyAgg() { return { n: 0, wins: 0, validated: 0, gp: 0, gl: 0, score: 0, errs: {} }; }
+  function addAgg(A, x) { A.n++; if (x.R > 0) { A.wins++; A.gp += x.R; } else A.gl -= x.R; A.score += x.score || 0; if (x.validated) A.validated++; (x.errors || []).forEach(e => A.errs[e] = (A.errs[e] || 0) + 1); }
+  function getAgg() { let A = lsGet(AGG, null); if (!A) { A = emptyAgg(); lsGet(HKEY, []).forEach(x => addAgg(A, x)); lsSet(AGG, A); } return A; }
+  function record(rec) { const A = getAgg(); const H = lsGet(HKEY, []); H.push(rec); lsSet(HKEY, H.slice(-300)); addAgg(A, rec); lsSet(AGG, A); }
+  function level(v) { return v >= R.goal ? ['Certifié SMC / ICT', 5] : v >= 10000 ? ['Expert', 4] : v >= 1000 ? ['Avancé', 3] : v >= 100 ? ['Intermédiaire', 2] : v >= 10 ? ['Apprenti', 1] : ['Débutant', 0]; }
 
   /* ---------------- interface ---------------- */
   function mount(root, onBack) {
     R.root = root; R.onBack = onBack;
+    const W = weeks(10);
     root.innerHTML = `
       <div class="ac-nav"><button class="iconbtn" data-rp="back" type="button">← Académie</button><span class="sub">Simulateur · trader et backtester votre stratégie</span></div>
       <div class="card rp-setup">
         <div class="ctl"><span class="lbl">Marché</span><div class="seg" data-rp="sym">${Object.keys(SYM).map(s => `<button type="button" data-v="${s}">${SYM[s].name}</button>`).join('')}</div></div>
         <div class="ctl"><span class="lbl">Unité de temps</span><div class="seg" data-rp="tf">${Object.keys(TF).map(t => `<button type="button" data-v="${t}">${t}</button>`).join('')}</div></div>
-        <div class="ctl"><span class="lbl">Remonter le marché de</span><select class="fsel" data-rp="rewind">${REWIND.map(r => `<option value="${r[0]}">${r[1]}</option>`).join('')}</select></div>
-        <button class="btn primary" type="button" data-rp="start">Remonter et commencer</button>
+        <div class="ctl"><span class="lbl">Semaine à analyser / point de départ</span><select class="fsel" data-rp="period">
+          <optgroup label="Semaine à analyser">${W.map(w => `<option value="${w.id}">${esc(w.label)}</option>`).join('')}</optgroup>
+          <optgroup label="Remonter depuis maintenant">${REWIND.map(r => `<option value="${r[0]}">${r[1]}</option>`).join('')}</optgroup></select></div>
+        <button class="btn primary" type="button" data-rp="start">Charger et commencer</button>
       </div>
       <div class="rp-main">
         <div class="card rp-left">
           <div class="rp-tools" data-rp="tools"></div>
-          <div class="rp-chart"><div class="rp-c"></div><canvas class="rp-ov"></canvas><div class="rp-status"></div></div>
+          <div class="rp-chart"><div class="rp-c"></div><canvas class="rp-ov"></canvas><div class="rp-status"></div><div class="rp-day" data-rp="day" hidden></div></div>
           <div class="rp-ctrl" data-rp="ctrl"></div>
         </div>
         <aside class="rp-right">
-          <div class="card rp-panel"><h3>Mon analyse</h3>
+          <div class="card rp-panel"><h3>Mon analyse et mes ordres</h3>
             <span class="lbl">Tendance que je vois</span><div class="seg rp-trend" data-rp="trend">
               <button type="button" data-v="1">Haussière</button><button type="button" data-v="0">Range</button><button type="button" data-v="-1">Baissière</button></div>
-            <div class="rp-row"><button class="btn" type="button" data-rp="ask">Demander l'avis du professeur</button>
-              <label class="check"><input type="checkbox" data-rp="fix"> Correction</label></div>
+            <div class="rp-row"><button class="btn" type="button" data-rp="ask">Avis du professeur</button><label class="check"><input type="checkbox" data-rp="fix"> Correction</label></div>
             <div class="rp-row"><button class="btn rp-buy" type="button" data-rp="buy">Acheter</button><button class="btn rp-sell" type="button" data-rp="sell">Vendre</button></div>
             <div class="rp-ticket" data-rp="ticket"></div>
+            <div class="rp-positions" data-rp="positions"></div>
           </div>
           <div class="card rp-panel"><h3>Professeur</h3><div class="rp-msgs" data-rp="msgs"></div></div>
-          <div class="card rp-panel"><h3>Suivi de l'élève · backtest</h3><div data-rp="stats"></div></div>
+          <div class="card rp-panel"><h3>Certification SMC / ICT · suivi</h3><div data-rp="stats"></div></div>
         </aside>
       </div>`;
     const q = s => root.querySelector(`[data-rp="${s}"]`);
-    q('back').onclick = () => { destroyChart(); onBack && onBack(); };
-    q('sym').onclick = e => { const b = e.target.closest('button'); if (!b) return; R.sym = b.dataset.v; lsSet('at:rp:sym', R.sym); renderSetup(); };
-    q('tf').onclick = async e => { const b = e.target.closest('button'); if (!b || b.dataset.v === R.tf) return; const was = R.all.length > 0; R.tf = b.dataset.v; lsSet('at:rp:tf', R.tf); renderSetup();
-      if (was && !(R.trade && R.trade.open)) { stop(); await load(true); say(`Unité de temps changée en ${R.tf}, au même instant du replay. Tes tracés sont conservés ; seules les marques de l'UT courante comptent dans la note.`, 'info'); } };
-    q('rewind').onchange = e => { R.rewind = e.target.value; lsSet('at:rp:rw', R.rewind); };
+    q('back').onclick = () => { destroyChart(); if (onBack) onBack(); };
+    q('sym').onclick = e => { const b = e.target.closest('button'); if (!b) return; if (R.trades.some(t => t.open)) { say('Clôture tes positions avant de changer de marché.', 'warn'); return; } R.sym = b.dataset.v; lsSet('at:rp:sym', R.sym); renderSetup(); };
+    q('tf').onclick = async e => { const b = e.target.closest('button'); if (!b || b.dataset.v === R.tf) return;
+      if (R.trades.some(t => t.open)) { say('Clôture tes positions avant de changer d\'unité de temps.', 'warn'); return; }
+      const was = R.all.length > 0; R.tf = b.dataset.v; lsSet('at:rp:tf', R.tf); renderSetup();
+      if (was) { stop(); if (await load(true) >= 0) say(`Unité de temps ${R.tf}, au même instant du replay. Tes tracés sont conservés.`, 'info'); } };
+    q('period').onchange = e => { R.period = e.target.value; lsSet('at:rp:period', R.period); };
     q('start').onclick = start;
     q('trend').onclick = e => { const b = e.target.closest('button'); if (!b) return; R.trend = +b.dataset.v; renderSetup(); };
-    q('ask').onclick = () => { if (!R.all.length) return; stop(); reviewAnalysis(false); };
-    q('fix').onchange = e => { R.showFix = e.target.checked; if (R.showFix) say('Correction affichée en pointillés dorés : sommets / creux du bot (HH, HL, LH, LL), BOS / CHoCH, OB et FVG intacts. Compare-les aux tiens.', 'info'); requestAnimationFrame(drawOverlay); };
-    q('buy').onclick = () => R.all.length && newTicket(1);
-    q('sell').onclick = () => R.all.length && newTicket(-1);
-    buildChart(); renderSetup(); renderTools(); renderControls(); renderTicket(); renderMsgs(); renderStats();
-    if (!R.msgs.length) say('Bienvenue dans le simulateur. Choisis un marché, une unité de temps et de combien remonter, puis « Remonter et commencer ». Le graphique s\'arrête au point de départ : tu ne vois pas le futur.', 'info');
+    q('ask').onclick = () => { if (!R.cur) return; stop(); reviewAnalysis(false); };
+    q('fix').onchange = e => { R.showFix = e.target.checked; if (R.showFix) say('Correction en pointillés dorés : swings HH / HL / LH / LL, BOS / CHoCH / MSS, OB, FVG et Fibonacci de la dernière jambe.', 'info'); requestAnimationFrame(drawOverlay); };
+    q('buy').onclick = () => newTicket(1); q('sell').onclick = () => newTicket(-1);
+    buildChart(); renderSetup(); renderTools(); renderControls(); renderTicket(); renderPositions(); renderMsgs(); renderStats();
+    if (!R.msgs.length) say('Bienvenue. Choisis un marché (or, BTC, EUR/USD, S&P 500), une unité de temps et la semaine à analyser, puis « Charger et commencer ». Le graphique s\'arrête au début de la semaine : tu ne vois pas la suite.', 'info');
     if (R.all.length) setData();
   }
   async function start() {
-    stop(); R.draws = []; R.trend = null; R.trade = null; R.showFix = false; R.pending = null; R.marks = [];
+    if (R.trades.some(t => t.open)) { say('Clôture tes positions avant de recharger.', 'warn'); return; }
+    stop(); R.draws = []; R.trend = null; R.ticket = null; R.trades = []; R.marks = []; R.pending = null; R.showFix = false; R.lastSess = null; R.equity = 0;
     const cb = R.root.querySelector('[data-rp="fix"]'); if (cb) cb.checked = false;
-    const left = await load(false);
-    const rw = REWIND.find(r => r[0] === R.rewind);
-    say(`Marché remonté ${R.rewind === 'rand' ? 'à une date au hasard' : 'de ' + rw[1]} : nous sommes le <b>${fT(cursorTime())}</b> (${R.sym === 'XAU/USD' ? 'or via PAXG' : 'BTC'}, ${R.tf}). ${left} bougie(s) à venir.`, 'info');
-    if (left <= 0) say(`Remonter de ${rw[1]} en ${R.tf} ne laisse aucune bougie à jouer : choisis une unité de temps plus petite ou remonte plus loin.`, 'warn');
-    say('<b>Méthode</b> : 1) marque les plus hauts (H) et plus bas (B) récents ; 2) déclare la tendance ; 3) trace les OB / FVG dans son sens ; 4) lance ▶ et attends que le prix vienne dans ta zone ; 5) achète ou vends avec un stop et un objectif. Je te corrige à chaque étape.', 'tip');
-    renderSetup(); renderTicket(); renderStats();
+    const left = await load(false); if (left < 0) return;
+    const wk = R.period[0] === 'w' ? weeks(10).find(w => w.id === R.period) : null, nx = R.all[R.cur];
+    say(`<b>${SYM[R.sym].name}</b> en ${R.tf} · ${wk ? `semaine ${esc(wk.label.replace('Semaine en cours · ', ''))}` : `départ le ${DAYF.format(new Date(cursorTime() * 1000))}`}. Le graphique s'arrête ${nx && nx.t - cursorTime() > 6 * 3600 ? `à la clôture précédente ; reprise du marché ${DSHORT.format(new Date(nx.t * 1000))} ${fT(nx.t).split(' ').pop()}` : `le ${fT(cursorTime())}`}. ${left} bougie(s) à venir. Source : ${esc(R.src)}.`, 'info');
+    say('<b>Méthode</b> : 1) marque la structure avec HH / HL / LH / LL ; 2) déclare la tendance ; 3) repère le MSS, les OB et FVG ; 4) trace le Fibonacci (à la main ou « Fibo auto ») et repère l\'OTE ; 5) lance ▶ et attends la kill zone (bandes de couleur en bas du graphique) ; 6) achète ou vends, puis règle SL / TP en faisant glisser les lignes.', 'tip');
+    renderSetup(); renderTicket(); renderPositions(); renderStats();
   }
   function renderSetup() {
     const r = R.root; if (!r) return;
     r.querySelectorAll('[data-rp="sym"] button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === R.sym));
     r.querySelectorAll('[data-rp="tf"] button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === R.tf));
     r.querySelectorAll('[data-rp="trend"] button').forEach(b => b.setAttribute('aria-pressed', R.trend != null && +b.dataset.v === R.trend));
-    const sel = r.querySelector('[data-rp="rewind"]'); if (sel) sel.value = R.rewind;
+    const sel = r.querySelector('[data-rp="period"]'); if (sel) sel.value = R.period;
   }
   function renderTools() {
     const el = R.root && R.root.querySelector('[data-rp="tools"]'); if (!el) return;
-    el.innerHTML = TOOLS.map(([k, ic, l]) => `<button type="button" class="rp-tool" data-tool="${k}" aria-pressed="${R.tool === k}" title="${esc(l)}"><b>${ic}</b><span>${esc(l.split(' (')[0])}</span></button>`).join('') +
-      `<button type="button" class="rp-tool" data-tool="clear" title="Tout effacer"><b>✕</b><span>Tout effacer</span></button>`;
+    el.innerHTML = TOOLS.map(([k, ic, l]) => `<button type="button" class="rp-tool" data-tool="${k}" aria-pressed="${R.tool === k}" title="${esc(l)}"><b>${ic}</b><span>${esc(l)}</span></button>`).join('') +
+      '<button type="button" class="rp-tool gold" data-tool="autofib" title="Fibonacci automatique sur la dernière jambe"><b>Fib</b><span>Fibo auto</span></button>' +
+      '<button type="button" class="rp-tool" data-tool="clear" title="Tout effacer"><b>✕</b><span>Tout effacer</span></button>';
     el.onclick = e => { const b = e.target.closest('button'); if (!b) return; const k = b.dataset.tool;
       if (k === 'clear') { R.draws = []; R.pending = null; requestAnimationFrame(drawOverlay); return; }
-      R.tool = k; R.pending = null; renderTools();
-      if (chart) chart.applyOptions({ handleScroll: k === 'cursor', handleScale: true });
-      const tips = { hi: 'Clique sur une bougie : le point se place sur sa mèche haute.', lo: 'Clique sur une bougie : le point se place sur sa mèche basse.', ob: 'Clique sur la bougie qui forme l\'OB (dernière bougie opposée avant l\'impulsion).', fvg: 'Clique sur la bougie du milieu du mouvement de 3 bougies.', hline: 'Clique à la hauteur du niveau.', tline: 'Clique sur deux points.', erase: 'Clique sur un tracé pour l\'effacer.' };
-      if (tips[k]) renderStatus(tips[k]); };
+      if (k === 'autofib') { autoFib(); return; }
+      R.tool = k; R.pending = null; renderTools(); if (chart) chart.applyOptions({ handleScroll: k === 'cursor', handleScale: true }); if (TIPS[k]) renderStatus(TIPS[k]); };
   }
   function renderControls() {
     const el = R.root && R.root.querySelector('[data-rp="ctrl"]'); if (!el) return;
     el.innerHTML = `<button class="btn primary rp-play" type="button" data-c="play">${R.playing ? '⏸ Pause' : '▶ Lecture'}</button>
-      <button class="btn" type="button" data-c="step" title="Avancer d'une bougie">⏭ 1 bougie</button>
+      <button class="btn" type="button" data-c="step">⏭ 1 bougie</button>
       <div class="seg" data-c="speed">${[1, 3, 10, 30, 100].map(s => `<button type="button" data-v="${s}" aria-pressed="${R.speed === s}">${s}×</button>`).join('')}</div>
       <span class="rp-clock" data-c="clock"></span>`;
-    el.querySelector('[data-c="play"]').onclick = () => { if (!R.all.length) return; R.playing ? stop() : play(); };
+    el.querySelector('[data-c="play"]').onclick = () => { if (!R.all.length) return; if (R.playing) stop(); else play(); };
     el.querySelector('[data-c="step"]').onclick = () => { if (!R.all.length) return; stop(); stepCandle(); };
     el.querySelector('[data-c="speed"]').onclick = e => { const b = e.target.closest('button'); if (!b) return; R.speed = +b.dataset.v; renderControls(); };
     renderStatus();
   }
   function renderStatus(msg) {
     if (!R.root) return;
-    const st = R.root.querySelector('.rp-status'), ck = R.root.querySelector('[data-c="clock"]');
+    const st = R.root.querySelector('.rp-status'), ck = R.root.querySelector('[data-c="clock"]'), day = R.root.querySelector('[data-rp="day"]');
     if (ck) ck.textContent = R.all.length ? `${fT(cursorTime())} · ${Math.max(0, R.all.length - R.cur)} bougies à venir` : '';
-    if (st) { st.textContent = msg || (R.loading ? 'Chargement…' : R.all.length ? `${R.src} · ${R.tf}` : 'Choisis les réglages puis « Remonter et commencer »'); }
+    if (st) st.textContent = msg || (R.loading ? 'Chargement…' : R.all.length ? `${R.src} · ${R.tf}` : 'Choisis les réglages puis « Charger et commencer »');
+    if (day) {
+      if (!R.cur) { day.hidden = true; return; }
+      const t = cursorTime(), nxt = R.all[R.cur], s = sessionOf(t), cap = x => x.charAt(0).toUpperCase() + x.slice(1);
+      if (nxt && nxt.t - t > 6 * 3600) day.innerHTML = `<b>Marché fermé</b> (week-end) · reprise ${esc(DSHORT.format(new Date(nxt.t * 1000)))} ${esc(fT(nxt.t).split(' ').pop())}`;
+      else day.innerHTML = `<b>${esc(cap(DAYF.format(new Date(t * 1000))))}</b> · ${s ? `session <b class="${s === 'Londres' || s === 'New York AM' ? 'kz' : ''}">${esc(s)}</b>` : 'hors session'}`;
+      day.hidden = false;
+    }
   }
   function renderTicket() {
     const el = R.root && R.root.querySelector('[data-rp="ticket"]'); if (!el) return;
-    const t = R.trade;
-    if (!t) { el.innerHTML = '<p class="sub">Quand ton analyse est prête et que le prix est dans ta zone, choisis Acheter ou Vendre.</p>'; return; }
-    const rr = Math.abs(t.tp - t.entry) / Math.max(1e-9, Math.abs(t.entry - t.sl)), sz = sizing(t.entry, t.sl);
-    if (t.open) {
-      const last = R.live ? R.live.c : R.all[R.cur - 1].c, r = (last - t.entry) * t.dir / t.risk;
-      el.innerHTML = `<div class="rp-pos ${t.dir === 1 ? 'buy' : 'sell'}"><b>${t.dir === 1 ? 'ACHAT' : 'VENTE'} en cours</b> · entrée ${fp(t.entry)} · stop ${fp(t.sl)} · objectif ${fp(t.tp)}<br>
-        <span class="${r >= 0 ? 'up' : 'down'}">${r >= 0 ? '+' : ''}${r.toFixed(2)} R</span> · taille ${esc(sz.label)}</div>
-        <div class="rp-row"><button class="btn" type="button" data-t="be">Stop au break-even</button><button class="btn" type="button" data-t="close">Clôturer au marché</button></div>`;
-      el.querySelector('[data-t="be"]').onclick = () => { if (t.be) return; t.sl = t.entry; t.be = true; tradeLines(); renderTicket(); say('Stop déplacé au point d\'entrée : le trade ne peut plus te coûter (hors coûts).', 'ok'); };
-      el.querySelector('[data-t="close"]').onclick = () => closeTrade(R.live ? R.live.c : R.all[R.cur - 1].c, 'clôture manuelle');
-      return;
-    }
-    if (t.exit != null) { el.innerHTML = `<div class="rp-pos ${t.R >= 0 ? 'buy' : 'sell'}"><b>Trade terminé : ${t.R >= 0 ? '+' : ''}${t.R.toFixed(2)} R</b> (${esc(t.why)}) · note ${t.review.total}/100</div>
-      <p class="sub">Continue la lecture pour une nouvelle opportunité, ou relance une séance.</p>`; return; }
-    el.innerHTML = `<div class="rp-pos ${t.dir === 1 ? 'buy' : 'sell'}"><b>Ordre ${t.dir === 1 ? 'd\'achat' : 'de vente'}</b> au marché · ${fp(t.entry)}</div>
-      <div class="rp-grid">
-        <label>Stop<input type="number" step="any" data-t="sl" value="${t.sl.toFixed(SYM[R.sym].dec)}"></label><button class="iconbtn" type="button" data-t="pick-sl">placer sur le graphique</button>
-        <label>Objectif<input type="number" step="any" data-t="tp" value="${t.tp.toFixed(SYM[R.sym].dec)}"></label><button class="iconbtn" type="button" data-t="pick-tp">placer sur le graphique</button>
-        <label>Risque<select data-t="pct">${[0.5, 1, 1.5, 2].map(p => `<option value="${p}" ${p === t.pct ? 'selected' : ''}>${String(p).replace('.', ',')} %</option>`).join('')}</select></label><span class="sub">taille ${esc(sz.label)} · −${fmt(sz.risk, 0)} $ si stop</span>
+    const k = R.ticket;
+    if (!k) { el.innerHTML = `<p class="sub">Choisis Acheter ou Vendre quand le prix est dans ta zone. Jusqu'à ${MAX_OPEN} positions en même temps.</p>`; return; }
+    const rr = Math.abs(k.tp - k.entry) / Math.max(1e-12, Math.abs(k.entry - k.sl)), sz = sizeFor(k.entry, k.sl, k.pct);
+    el.innerHTML = `<div class="rp-pos ${k.dir === 1 ? 'buy' : 'sell'}"><b>Nouvel ordre ${k.dir === 1 ? 'd\'achat' : 'de vente'}</b> au marché · ${fp(k.entry)}<br>
+        <span class="sub">Maintiens et fais glisser les lignes SL / TP sur le graphique, ou saisis-les :</span></div>
+      <div class="rp-grid2">
+        <label>Stop<input type="number" step="any" data-t="sl" value="${k.sl.toFixed(dec())}"></label>
+        <label>Objectif<input type="number" step="any" data-t="tp" value="${k.tp.toFixed(dec())}"></label>
+        <label>Risque : <b>${String(k.pct).replace('.', ',')} %</b><input type="range" min="0.25" max="3" step="0.25" value="${k.pct}" data-t="pct"></label>
+        <label>Capital ($)<input type="number" step="100" min="100" data-t="bal" value="${R.balance}"></label>
       </div>
-      <p class="sub">R:R 1:${rr.toFixed(2)}</p>
+      <p class="sub">Taille <b>${esc(sz.label)}</b> · perte si stop <b class="down">−${fmt(sz.risk, 2)} $</b> · gain si objectif <b class="up">+${fmt(sz.risk * rr, 2)} $</b> · R:R 1:${rr.toFixed(2)}</p>
       <div class="rp-row"><button class="btn primary" type="button" data-t="ok">Valider l'ordre</button><button class="btn" type="button" data-t="cancel">Annuler</button></div>`;
-    el.querySelector('[data-t="sl"]').onchange = e => { t.sl = +e.target.value; renderTicket(); tradeLines(); };
-    el.querySelector('[data-t="tp"]').onchange = e => { t.tp = +e.target.value; renderTicket(); tradeLines(); };
-    el.querySelector('[data-t="pct"]').onchange = e => { t.pct = +e.target.value; renderTicket(); };
-    el.querySelector('[data-t="pick-sl"]').onclick = () => { R.tool = 'sl'; renderTools(); chart && chart.applyOptions({ handleScroll: false }); renderStatus('Clique sur le graphique au niveau du stop.'); };
-    el.querySelector('[data-t="pick-tp"]').onclick = () => { R.tool = 'tp'; renderTools(); chart && chart.applyOptions({ handleScroll: false }); renderStatus('Clique sur le graphique au niveau de l\'objectif.'); };
+    el.querySelector('[data-t="sl"]').onchange = e => { k.sl = +e.target.value; renderTicket(); priceLines(); requestAnimationFrame(drawOverlay); };
+    el.querySelector('[data-t="tp"]').onchange = e => { k.tp = +e.target.value; renderTicket(); priceLines(); requestAnimationFrame(drawOverlay); };
+    el.querySelector('[data-t="pct"]').oninput = e => { k.pct = +e.target.value; lsSet('at:rp:pct', k.pct); renderTicket(); };
+    el.querySelector('[data-t="bal"]').onchange = e => { R.balance = Math.max(100, +e.target.value || 10000); lsSet('at:rp:bal', R.balance); renderTicket(); };
     el.querySelector('[data-t="ok"]').onclick = validate;
-    el.querySelector('[data-t="cancel"]').onclick = () => { R.trade = null; renderTicket(); tradeLines(); };
+    el.querySelector('[data-t="cancel"]').onclick = () => { R.ticket = null; renderTicket(); priceLines(); requestAnimationFrame(drawOverlay); };
+  }
+  function renderPositions() {
+    const el = R.root && R.root.querySelector('[data-rp="positions"]'); if (!el) return;
+    const open = R.trades.filter(t => t.open), done = R.trades.filter(t => !t.open);
+    if (!R.trades.length) { el.innerHTML = ''; return; }
+    const px = R.cur ? lastPx() : 0;
+    el.innerHTML = `<span class="lbl">Positions (${open.length} ouverte${open.length > 1 ? 's' : ''}) · résultat de la séance <b class="${R.equity >= 0 ? 'up' : 'down'}">${R.equity >= 0 ? '+' : ''}${fmt(R.equity, 2)} $</b></span>
+      ${open.map(t => { const pnl = (px - t.entry) * t.dir * t.units, r = pnl / t.riskUsd; return `<div class="rp-pos ${t.dir === 1 ? 'buy' : 'sell'}"><b>#${t.id} ${t.dir === 1 ? 'Achat' : 'Vente'}</b> ${fp(t.entry)} · SL ${fp(t.sl)} · TP ${fp(t.tp)}
+        <span class="${r >= 0 ? 'up' : 'down'}"> ${r >= 0 ? '+' : ''}${r.toFixed(2)} R (${pnl >= 0 ? '+' : ''}${fmt(pnl, 2)} $)</span><br><span class="sub">${esc(t.day)} · ${esc(t.session)} · risque actuel ${fmt(riskNow(t), 0)} $</span>
+        <div class="rp-row"><button class="iconbtn" type="button" data-be="${t.id}">Stop au break-even</button><button class="iconbtn" type="button" data-close="${t.id}">Clôturer</button></div></div>`; }).join('')}
+      ${done.slice(-4).reverse().map(t => `<div class="rp-done"><span>#${t.id} ${t.dir === 1 ? 'Achat' : 'Vente'} · ${esc(t.why)}</span><b class="${t.R >= 0 ? 'up' : 'down'}">${t.R >= 0 ? '+' : ''}${t.R.toFixed(2)} R</b><span>note ${t.review.total}</span></div>`).join('')}`;
+    el.querySelectorAll('[data-be]').forEach(b => b.onclick = () => { const t = R.trades.find(x => x.id === +b.dataset.be); if (!t || !t.open) return;
+      if ((t.entry - lastPx()) * t.dir >= 0) { say('Le prix n\'est pas encore au-delà de ton entrée : break-even impossible.', 'warn'); return; }
+      t.sl = t.entry; priceLines(); renderPositions(); requestAnimationFrame(drawOverlay); say(`Trade n°${t.id} : stop au point d'entrée, il ne peut plus coûter.`, 'ok'); });
+    el.querySelectorAll('[data-close]').forEach(b => b.onclick = () => { const t = R.trades.find(x => x.id === +b.dataset.close); if (t) closeTrade(t, lastPx(), 'clôture manuelle'); });
   }
   function renderMsgs() {
     const el = R.root && R.root.querySelector('[data-rp="msgs"]'); if (!el) return;
-    el.innerHTML = R.msgs.slice(-25).map(m => `<div class="rp-msg ${m.kind}"><span class="av">🎓</span><div>${m.html}</div></div>`).join('');
+    el.innerHTML = R.msgs.slice(-30).map(m => `<div class="rp-msg ${m.kind}"><span class="av">🎓</span><div>${m.html}</div></div>`).join('');
     el.scrollTop = el.scrollHeight;
   }
   function renderStats() {
     const el = R.root && R.root.querySelector('[data-rp="stats"]'); if (!el) return;
-    const s = stats();
-    if (!s) { el.innerHTML = '<p class="sub">Tes trades simulés apparaîtront ici : taux de réussite, R cumulé, note moyenne et erreurs récurrentes. C\'est le backtest de <b>ta</b> stratégie.</p>'; return; }
-    const trend = s.prev != null ? (s.last > s.prev ? `en progrès (+${(s.last - s.prev).toFixed(0)} pts)` : s.last < s.prev ? `en baisse (${(s.last - s.prev).toFixed(0)} pts)` : 'stable') : '';
-    el.innerHTML = `<div class="rp-stats">
-        <div><span>Trades</span><b>${s.n}</b></div><div><span>Réussite</span><b>${Math.round(s.win * 100)} %</b></div>
-        <div><span>R cumulé</span><b class="${s.sumR >= 0 ? 'up' : 'down'}">${s.sumR >= 0 ? '+' : ''}${s.sumR.toFixed(1)}</b></div><div><span>Espérance</span><b>${s.exp >= 0 ? '+' : ''}${s.exp.toFixed(2)} R</b></div>
-        <div><span>Facteur de profit</span><b>${isFinite(s.pf) ? s.pf.toFixed(2) : '∞'}</b></div><div><span>Note moyenne</span><b>${Math.round(s.score)}/100</b></div></div>
-      ${trend ? `<p class="sub">10 derniers trades : ${esc(trend)}.</p>` : ''}
-      ${s.errs.length ? `<p class="sub"><b>À travailler :</b> ${s.errs.map(([e, n]) => `${esc(e)} (${n}×)`).join(', ')}.</p>` : ''}
-      <div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Marché</th><th>Sens</th><th>R</th><th>Note</th></tr></thead><tbody>
-        ${s.H.slice(-8).reverse().map(x => `<tr><td>${new Date(x.d).toLocaleDateString('fr-FR')}</td><td>${esc(x.sym)} ${esc(x.tf)}</td><td class="${x.dir === 1 ? 'up' : 'down'}">${x.dir === 1 ? 'Achat' : 'Vente'}</td><td class="${x.R >= 0 ? 'up' : 'down'}">${x.R >= 0 ? '+' : ''}${x.R}</td><td>${x.score}</td></tr>`).join('')}
+    const H = lsGet(HKEY, []), A = getAgg(), v = A.validated || 0, pctG = Math.min(100, v / R.goal * 100), [lvl, li] = level(v);
+    const head = `<div class="rp-cert"><div class="rp-cert-top"><span class="lbl">Trades gagnants validés</span><b>${fmt(v, 0)} / ${fmt(R.goal, 0)}</b></div>
+        <div class="bar"><i style="width:${Math.max(0.5, pctG)}%"></i></div>
+        <div class="rp-levels">${['Débutant', 'Apprenti', 'Intermédiaire', 'Avancé', 'Expert', 'Certifié'].map((n, i) => `<span class="${i <= li ? 'on' : ''}">${n}</span>`).join('')}</div>
+        <p class="sub">Niveau : <b>${esc(lvl)}</b>. Un trade est <b>validé</b> s'il est gagnant, noté au moins 70 / 100 par le professeur et sans stop éloigné. Objectif pour maîtriser l'analyse SMC / ICT :
+          <input class="rp-goal" type="number" min="10" step="10" value="${R.goal}" data-rp="goal"> trades validés.</p></div>`;
+    if (!A.n) { el.innerHTML = head + '<p class="sub">Tes trades simulés apparaîtront ici : c\'est le backtest de <b>ta</b> stratégie.</p>'; bindGoal(el); return; }
+    const errs = Object.entries(A.errs || {}).sort((a, b) => b[1] - a[1]).slice(0, 3), sumR = A.gp - A.gl;
+    el.innerHTML = head + `<div class="rp-stats">
+        <div><span>Trades</span><b>${fmt(A.n, 0)}</b></div><div><span>Réussite</span><b>${Math.round(A.wins / A.n * 100)} %</b></div>
+        <div><span>R cumulé</span><b class="${sumR >= 0 ? 'up' : 'down'}">${sumR >= 0 ? '+' : ''}${sumR.toFixed(1)}</b></div><div><span>Espérance</span><b>${(sumR / A.n) >= 0 ? '+' : ''}${(sumR / A.n).toFixed(2)} R</b></div>
+        <div><span>Facteur de profit</span><b>${A.gl ? (A.gp / A.gl).toFixed(2) : '∞'}</b></div><div><span>Note moyenne</span><b>${Math.round(A.score / A.n)}/100</b></div></div>
+      ${errs.length ? `<p class="sub"><b>À travailler :</b> ${errs.map(([e, n]) => `${esc(e)} (${n}×)`).join(', ')}.</p>` : ''}
+      <div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Marché</th><th>Session</th><th>Sens</th><th>R</th><th>Note</th><th>✓</th></tr></thead><tbody>
+        ${H.slice(-8).reverse().map(x => `<tr><td>${new Date(x.d).toLocaleDateString('fr-FR')}</td><td>${esc(SYM[x.sym] ? SYM[x.sym].name : x.sym)} ${esc(x.tf)}</td><td>${esc(x.session || '—')}</td><td class="${x.dir === 1 ? 'up' : 'down'}">${x.dir === 1 ? 'Achat' : 'Vente'}</td><td class="${x.R >= 0 ? 'up' : 'down'}">${x.R >= 0 ? '+' : ''}${x.R}</td><td>${x.score}</td><td>${x.validated ? '✓' : ''}</td></tr>`).join('')}
       </tbody></table></div>
-      ${s.n < 30 ? `<p class="note">${30 - s.n} trade(s) de plus pour un premier bilan fiable (30 minimum).</p>` : ''}
       <button class="iconbtn" type="button" data-rp="reset">Remettre le suivi à zéro</button>`;
-    el.querySelector('[data-rp="reset"]').onclick = () => { if (confirm('Effacer tout l\'historique du simulateur ?')) { lsSet(HKEY, []); renderStats(); } };
+    bindGoal(el);
+    el.querySelector('[data-rp="reset"]').onclick = () => { if (confirm('Effacer tout l\'historique et la progression du simulateur ?')) { lsSet(HKEY, []); lsSet(AGG, emptyAgg()); renderStats(); } };
   }
+  function bindGoal(el) { const g = el.querySelector('[data-rp="goal"]'); if (g) g.onchange = e => { R.goal = Math.max(10, Math.round(+e.target.value || 26000)); lsSet('at:rp:goal', R.goal); renderStats(); }; }
   window.addEventListener('at:view', e => { if (e.detail !== 'academy') stop(); });
   window.ATReplay = { mount, unmount: destroyChart, _R: R };
 })();

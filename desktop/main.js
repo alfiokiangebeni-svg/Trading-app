@@ -30,8 +30,8 @@ Menu.setApplicationMenu(Menu.buildFromTemplate([
 
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 app.whenReady().then(() => {
-  // The economic calendar (ForexFactory) sends no CORS header: allow the app to read it.
-  session.defaultSession.webRequest.onHeadersReceived({ urls: ['https://nfs.faireconomy.media/*'] }, (details, cb) => {
+  // The economic calendar (ForexFactory) and Yahoo Finance send no CORS header: allow the app to read them.
+  session.defaultSession.webRequest.onHeadersReceived({ urls: ['https://nfs.faireconomy.media/*', 'https://query1.finance.yahoo.com/*', 'https://query2.finance.yahoo.com/*'] }, (details, cb) => {
     const h = details.responseHeaders || {};
     h['access-control-allow-origin'] = ['*'];
     cb({ responseHeaders: h });
