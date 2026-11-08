@@ -1222,6 +1222,7 @@ window.AT={
       v2:{bias:A.v2.bias,status:A.v2.status,rows:A.v2.rows,signal:A.v2.signal},smc:{bias:A.smc.bias,status:A.smc.status,rows:A.smc.rows},
       pa:{bias:A.pa.bias,status:A.pa.status,rows:A.pa.rows},crt:{bias:A.crt.bias,status:A.crt.status},signal:currentSignal(),risk:Object.assign({},S.risk),
       kz:last?killZone(last.t+TF_SEC[S.tf]):null};},
+  lib:{findSwings,marketStructure,orderBlocks,fairValueGaps,atrArr,aggregate,emaArr,TF_SEC,SYMS,fp:(x,sym)=>fp(x,sym)},
   sizing:(e,sl)=>sizing(e,sl), symbols:SYMS, refreshSignal:()=>{if(S.analysis)renderSignal();}
 };
 go(location.hash.slice(1)||'trading');
@@ -1239,6 +1240,7 @@ loadData();
 <script src="js/calendar.js" defer></script>
 <script src="js/football.js" defer></script>
 <script src="js/academy-content.js" defer></script>
+<script src="js/replay.js" defer></script>
 <script src="js/academy.js" defer></script>
 <script src="js/lab.js" defer></script>
 </body>

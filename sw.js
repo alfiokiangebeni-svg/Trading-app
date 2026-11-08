@@ -1,7 +1,7 @@
 /* Alerte Trading service worker: app shell offline, market data always from the network. */
-const VERSION = 'at-v3';
+const VERSION = 'at-v4';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './css/sections.css', './js/calendar.js', './js/football.js',
-  './js/academy-content.js', './js/academy.js', './js/lab.js', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png',
+  './js/academy-content.js', './js/academy.js', './js/lab.js', './js/replay.js', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png',
   'https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => Promise.all(SHELL.map(u => c.add(new Request(u, { mode: u.startsWith('http') ? 'cors' : 'same-origin' })).catch(() => {})))).then(() => self.skipWaiting()));

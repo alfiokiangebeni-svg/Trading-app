@@ -25,13 +25,17 @@
           <div class="bar"><i style="width:${pr.pct}%"></i></div></div>
         <div class="ac-cta">${nx ? `<button class="btn primary" data-open="${nx.id}" type="button">${pr.d ? 'Continuer' : 'Commencer'} : ${esc(nx.title.replace(/^Étape \d+ · /, ''))}</button>` :
           '<button class="btn primary" data-open="live" type="button">Formation terminée : lancer l\'analyse guidée</button>'}
-          <button class="btn" data-open="live" type="button">Analyse guidée en direct</button></div>
+          <button class="btn" data-open="live" type="button">Analyse guidée en direct</button>
+          <button class="btn" data-open="replay" type="button">Simulateur : trader et backtester</button></div>
       </div>
       <div class="ac-parts">
         <section class="card ac-part"><h3><span class="pn">1</span>Théorie express <small>≈ ${C.theory.reduce((s, x) => s + x.min, 0)} min</small></h3>
           <p class="sub">L'essentiel pour comprendre ce que fait le bot, sans jargon inutile.</p>${C.theory.map((x, i) => item(x, i, 't')).join('')}</section>
         <section class="card ac-part"><h3><span class="pn">2</span>Méthode pas à pas <small>de la préparation au journal</small></h3>
           <p class="sub">Les 9 étapes d'une analyse complète, chacune reliée à l'outil de l'app.</p>${C.steps.map((x, i) => item(x, i, 'p')).join('')}</section>
+        <section class="card ac-part ac-sim"><h3><span class="pn">4</span>Trader et backtester votre stratégie</h3>
+          <p class="sub">Remontez le marché (1 semaine à 5 minutes), lancez la lecture comme en réel, tracez vos plus hauts / plus bas, OB et FVG, puis achetez ou vendez. Le professeur corrige, note et suit vos progrès.</p>
+          <button class="lesson" data-open="replay" type="button"><span class="ln-n">▶</span><span class="ln-t">Ouvrir le simulateur</span><span class="ln-m">${(() => { try { const h = JSON.parse(localStorage.getItem('at:replay:v1') || '[]'); return h.length ? h.length + ' trade(s)' : 'replay'; } catch (e) { return 'replay'; } })()}</span></button></section>
         <section class="card ac-part"><h3><span class="pn">3</span>Analyse guidée en direct</h3>
           <p class="sub">Le bot applique la méthode sur le marché réel, étape par étape, et vous dit si les conditions sont réunies.</p>
           <button class="lesson" data-open="live" type="button"><span class="ln-n">▶</span><span class="ln-t">Lancer l'analyse sur l'or ou le bitcoin</span><span class="ln-m">en direct</span></button></section>
@@ -110,8 +114,17 @@
       </div>`;
   }
 
+  let replayOn = false;
   function render() {
     const root = document.getElementById('view-academy'); if (!root) return;
+    if (current === 'replay' && window.ATReplay) {
+      if (replayOn) window.ATReplay.unmount();
+      replayOn = true; root.classList.add('wide');
+      window.ATReplay.mount(root, () => { replayOn = false; current = null; render(); window.scrollTo(0, 0); });
+      return;
+    }
+    if (replayOn) { window.ATReplay.unmount(); replayOn = false; }
+    root.classList.remove('wide');
     root.innerHTML = current === 'live' ? live() : current ? lesson(all().find(x => x.id === current)) : home();
     bind(root);
   }
