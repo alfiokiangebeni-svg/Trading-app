@@ -74,7 +74,17 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { path: files, merge-multiple: true }
       - run: ls -la files
-      - uses: softprops/action-gh-release@v2
+      - name: Version déjà publiée ?
+        id: exists
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          # Les releases de ce dépôt sont immuables : une version publiée ne peut plus être modifiée.
+          # Pour publier de nouveaux fichiers, augmenter APP_VERSION (les fichiers restent dans les artefacts du build).
+          if gh release view "v${APP_VERSION}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"; echo "v${APP_VERSION} existe déjà : publication ignorée."
+          else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.exists.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.APP_VERSION }}
           target_commitish: ${{ github.sha }}
