@@ -68,9 +68,9 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
 .top{position:sticky;top:0;z-index:9;border-bottom:1px solid var(--line);margin-left:calc(-1*max(16px,env(safe-area-inset-left,0px)));margin-right:calc(-1*max(16px,env(safe-area-inset-right,0px)));padding:env(safe-area-inset-top,0px) max(16px,env(safe-area-inset-right,0px)) 0 max(16px,env(safe-area-inset-left,0px))}
 .top-in{display:flex;align-items:center;gap:10px 12px;flex-wrap:wrap;padding-block:10px 0;max-width:1480px;margin:0 auto}
 .brand{display:flex;align-items:center;gap:11px;margin-right:auto;min-width:0}
-.logo{width:38px;height:38px;border-radius:11px;flex:none;display:grid;place-items:center;background:linear-gradient(135deg,#ffd76a,#f2a71b 55%,#c9780a);box-shadow:0 6px 22px -6px rgba(242,167,27,.7),inset 0 1px 0 rgba(255,255,255,.5)}
+.logo{width:38px;height:38px;border-radius:11px;flex:none;display:grid;place-items:center;background:linear-gradient(135deg,var(--ga,#ffd76a),var(--gb,#f2a71b) 55%,var(--gc,#c9780a));box-shadow:0 6px 22px -6px rgba(242,167,27,.7),inset 0 1px 0 rgba(255,255,255,.5)}
 .brand h1{font-family:var(--font-display);font-weight:700;font-size:20px;letter-spacing:-.01em;margin:0;line-height:1.05}
-.brand h1 span{background:linear-gradient(90deg,#ffd76a,#f2a71b);-webkit-background-clip:text;background-clip:text;color:transparent}
+.brand h1 span{background:linear-gradient(90deg,var(--ga,#ffd76a),var(--gb,#f2a71b));-webkit-background-clip:text;background-clip:text;color:transparent}
 .brand p{margin:2px 0 0;font-size:10.5px;color:var(--muted);letter-spacing:.14em;text-transform:uppercase}
 .tickers{display:flex;gap:8px}
 .tick{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface-2);border-radius:12px;padding:5px 10px;font-size:12px;white-space:nowrap;transition:border-color .2s,background .2s}
@@ -119,7 +119,7 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
 .btn:hover{border-color:rgba(242,193,78,.55)}
 .btn:active{transform:translateY(1px)}
 .btn[aria-pressed="true"]{border-color:rgba(242,193,78,.6);background:var(--accent-soft);color:var(--accent);box-shadow:inset 0 0 0 1px rgba(242,193,78,.2)}
-.btn.primary{background:linear-gradient(135deg,#ffd76a,#f2a71b);border-color:transparent;color:#1a1200;font-weight:700;box-shadow:var(--glow-gold)}
+.btn.primary{background:linear-gradient(135deg,var(--ga,#ffd76a),var(--gb,#f2a71b));border-color:transparent;color:var(--ink,#1a1200);font-weight:700;box-shadow:var(--glow-gold)}
 .btn.primary:hover{filter:brightness(1.07)}
 .btn:disabled{opacity:.55;cursor:progress}
 .btn svg{flex:none}
@@ -168,7 +168,7 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
 .meter-row{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
 .meter-row b{font-family:var(--font-mono);color:var(--fg)}
 .bar{height:8px;border-radius:99px;background:var(--surface-2);overflow:hidden;border:1px solid var(--line)}
-.bar i{display:block;height:100%;background:linear-gradient(90deg,#f2a71b,#ffd76a);border-radius:99px;transition:width .5s;box-shadow:0 0 12px rgba(242,193,78,.6)}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--gb,#f2a71b),var(--ga,#ffd76a));border-radius:99px;transition:width .5s;box-shadow:0 0 12px rgba(242,193,78,.6)}
 .votes{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
 .vote{border:1px solid var(--line);border-radius:10px;padding:7px 4px;text-align:center;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--surface-2)}
 .vote b{display:block;font-family:var(--font-mono);font-size:15px;color:var(--fg);margin-top:2px}
@@ -196,7 +196,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 
 /* engines */
 .sec-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:10px}
-.sec-h h2::before{content:"";display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:9px;background:linear-gradient(135deg,#ffd76a,#f2a71b);box-shadow:0 0 10px rgba(242,193,78,.7);vertical-align:2px}
+.sec-h h2::before{content:"";display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:9px;background:linear-gradient(135deg,var(--ga,#ffd76a),var(--gb,#f2a71b));box-shadow:0 0 10px var(--accent);vertical-align:2px}
 .sec-h p{margin:0;color:var(--muted);font-size:12.5px}
 .engines{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
 .check{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);padding-bottom:9px}.check input{accent-color:var(--accent)}
@@ -311,7 +311,7 @@ footer{font-size:11.5px;color:var(--faint);line-height:1.6;max-width:100ch}
       <span class="pill" id="srcPill" data-state="load"><span class="dot"></span><span id="srcTxt">Connexion aux cours…</span></span>
       <button class="switch" id="liveBtn" aria-pressed="false" type="button"><i></i><span>Alertes<span class="lbl-long"> en direct</span></span></button>
       <button class="iconbtn" id="soundBtn" type="button" aria-pressed="true">Son : activé</button>
-      <button class="iconbtn" id="themeBtn" type="button" aria-label="Changer de thème" title="Thème clair / sombre"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 1.7a6.3 6.3 0 010 12.6z" fill="currentColor"/></svg></button>
+      <button class="iconbtn" id="themeBtn" type="button" aria-label="Changer de thème" title="Choisir le thème"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 1.7a6.3 6.3 0 010 12.6z" fill="currentColor"/></svg></button>
       <nav class="topnav" aria-label="Sections">
         <a href="#trading" data-go="trading">Trading</a><a href="#news" data-go="news">Annonces</a><a href="#foot" data-go="foot">Football</a><a href="#academy" data-go="academy">Académie</a><a href="#lab" data-go="lab">Labo</a>
       </nav>
@@ -1182,8 +1182,18 @@ async function refreshTickers(){
 refreshTickers();setInterval(()=>{if(!document.hidden)refreshTickers();},30000);
 
 /* ---------- theme, install, tab bar ---------- */
-$('#themeBtn').addEventListener('click',()=>{const cur=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=cur;store.set('theme',cur);
-  const m=document.querySelector('meta[name=theme-color]');if(m)m.content=cur==='light'?'#eef1f6':'#05070b';});
+/* ---------- thèmes ---------- */
+const THEMES=[['dark','Obsidienne & or','#05070b','#f2c14e'],['light','Clair','#eef1f6','#b07d12'],['tv','TradingView','#131722','#2962ff'],['midnight','Minuit','#070b18','#5b9dff'],
+  ['emerald','Émeraude','#04110d','#2ee6a6'],['amethyst','Améthyste','#0b0714','#a78bfa'],['sunset','Rubis','#120608','#ff6b6b']];
+function setTheme(id){const t=THEMES.find(x=>x[0]===id)||THEMES[0];document.documentElement.dataset.theme=t[0];store.set('theme',t[0]);
+  const m=document.querySelector('meta[name=theme-color]');if(m)m.content=t[2];$$('#themeMenu button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.th===t[0])));}
+(function(){const menu=document.createElement('div');menu.id='themeMenu';menu.className='theme-menu';menu.hidden=true;
+  menu.innerHTML='<span class="lbl">Thème</span>'+THEMES.map(t=>`<button type="button" data-th="${t[0]}"><i style="background:linear-gradient(135deg,${t[2]} 50%,${t[3]} 50%)"></i>${esc(t[1])}</button>`).join('');
+  document.body.appendChild(menu);
+  $('#themeBtn').addEventListener('click',e=>{e.stopPropagation();const r=$('#themeBtn').getBoundingClientRect();menu.style.top=(r.bottom+8)+'px';menu.style.right=Math.max(8,innerWidth-r.right)+'px';menu.hidden=!menu.hidden;});
+  menu.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;setTheme(b.dataset.th);menu.hidden=true;});
+  document.addEventListener('click',e=>{if(!menu.hidden&&!menu.contains(e.target))menu.hidden=true;});
+  setTheme(document.documentElement.dataset.theme||'dark');})();
 let installEvt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;$('#installBtn').hidden=false;});
 window.addEventListener('appinstalled',()=>{$('#installBtn').hidden=true;toast('Alerte Trading est installée.');});
@@ -1198,14 +1208,14 @@ $('#viewerClose').addEventListener('click',()=>{$('#viewer').hidden=true;$('#vie
 
 /* ---------- sections (Trading, Annonces, Football, Académie, Labo) ---------- */
 const VIEWS=['trading','news','foot','academy','lab'];
-function go(v){
-  if(!VIEWS.includes(v))v='trading';
-  document.body.dataset.view=v;
+function go(route){
+  let v=(route||'').split('/')[0];if(!VIEWS.includes(v))v='trading';
+  const same=document.body.dataset.view===v;document.body.dataset.view=v;
   for(const x of VIEWS){const el=$('#view-'+x);if(el)el.hidden=x!==v;}
   $$('[data-go]').forEach(a=>a.setAttribute('aria-current',String(a.dataset.go===v)));
   window.dispatchEvent(new CustomEvent('at:view',{detail:v}));
   if(v==='trading')requestAnimationFrame(()=>{drawOverlay();drawEquityLast();});
-  window.scrollTo(0,0);
+  if(!same)window.scrollTo(0,0);
 }
 window.addEventListener('hashchange',()=>go(location.hash.slice(1)));
 /* bridge used by js/*.js */

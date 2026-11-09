@@ -1,5 +1,5 @@
 /* Alerte Trading service worker: app shell offline, market data always from the network. */
-const VERSION = 'at-v5';
+const VERSION = 'at-v6';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './css/sections.css', './js/calendar.js', './js/football.js',
   './js/academy-content.js', './js/academy.js', './js/lab.js', './js/replay.js', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png',
   'https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js'];
