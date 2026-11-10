@@ -69,6 +69,8 @@ jobs:
   release:
     name: Publier les téléchargements
     needs: [android, desktop]
+    # publie dès que l'APK est prêt, même si une version PC (souvent macOS, faute de machine) échoue
+    if: ${{ always() && needs.android.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
