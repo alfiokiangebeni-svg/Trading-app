@@ -36,7 +36,7 @@
     tool: 'cursor', pending: null, draws: [], trend: null, showFix: false, marks: [],
     ticket: null, trades: [], equity: 0, msgs: [], loading: false, src: '', root: null, onBack: null, seq: 0, lastSess: null,
     customDate: lsGet('at:rp:date', ''), customStart: 0, nowT: 0, magnet: lsGet('at:rp:mag', true), hideDraws: false, undo: [], redo: [],
-    stopWhen: null, guide: null
+    stopWhen: null, guide: null, of: { fp: false, delta: false, vp: false }, ofBinance: false, srcObj: null
   };
   if (!SYM[R.sym]) R.sym = 'XAU/USD';
   if (!TF[R.tf]) R.tf = '15m';
@@ -73,7 +73,7 @@
         try { j = await getJSON(`${h}/api/v3/klines?symbol=${sym}&interval=${BIN_TF[tf] || tf}&startTime=${s}&endTime=${b * 1000}&limit=1000`); break; } catch (e) { j = null; }
       }
       if (!j) throw new Error('Binance injoignable');
-      for (const k of j) out.push({ t: Math.floor(k[0] / 1000), o: +k[1], h: +k[2], l: +k[3], c: +k[4] });
+      for (const k of j) out.push({ t: Math.floor(k[0] / 1000), o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5], tb: +k[9] }); // tb = volume acheteur agressif
       if (!j.length) break; s = j[j.length - 1][0] + step;
     }
     return out;
@@ -81,13 +81,14 @@
   function aggregateTo(rows, sec) {
     const out = []; let cur = null;
     for (const x of rows) { const b = bucket(x.t, sec);
-      if (!cur || cur.t !== b) { cur = { t: b, o: x.o, h: x.h, l: x.l, c: x.c }; out.push(cur); } else { cur.h = Math.max(cur.h, x.h); cur.l = Math.min(cur.l, x.l); cur.c = x.c; } }
+      if (!cur || cur.t !== b) { cur = { t: b, o: x.o, h: x.h, l: x.l, c: x.c, v: x.v || 0, tb: x.tb == null ? null : x.tb }; out.push(cur); }
+      else { cur.h = Math.max(cur.h, x.h); cur.l = Math.min(cur.l, x.l); cur.c = x.c; cur.v += x.v || 0; cur.tb = cur.tb == null || x.tb == null ? null : cur.tb + x.tb; } }
     return out;
   }
   function parseYahoo(j) {
     const r = j && j.chart && j.chart.result && j.chart.result[0]; if (!r || !r.timestamp) return [];
     const q = r.indicators.quote[0], out = [];
-    r.timestamp.forEach((t, i) => { if (q.close[i] != null && q.open[i] != null && q.high[i] != null && q.low[i] != null) out.push({ t, o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i] }); });
+    r.timestamp.forEach((t, i) => { if (q.close[i] != null && q.open[i] != null && q.high[i] != null && q.low[i] != null) out.push({ t, o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i], v: (q.volume && q.volume[i]) || 0, tb: null }); });
     return out;
   }
   async function fromYahoo(sym, tf, a, b) {
@@ -101,16 +102,17 @@
     } catch (e) { rows = []; }
     if (rows.length < 50) { // copie GitHub qui s'allonge chaque jour (web-data.yml) : 5 min, 1 h et journalier
       const m = await getJSON(`${MIRROR}/${sym.replace(/[^A-Za-z0-9]/g, '_')}_${mfile}.json`);
-      rows = (m.rows || []).filter(x => x[0] >= a && x[0] < b).map(x => ({ t: x[0], o: x[1], h: x[2], l: x[3], c: x[4] }));
+      rows = (m.rows || []).filter(x => x[0] >= a && x[0] < b).map(x => ({ t: x[0], o: x[1], h: x[2], l: x[3], c: x[4], v: x[5] || 0, tb: null }));
       baseSec = mfile === '5m' ? 300 : mfile === '1h' ? 3600 : 86400;
     }
     const sec = TF[tf];
     return sec > baseSec ? aggregateTo(rows, sec) : rows;
   }
   async function fetchRange(tf, a, b) {
-    for (const s of SYM[R.sym].src) {
+    const srcs = R.ofBinance ? SYM[R.sym].src.slice().sort((x, y) => (y.b ? 1 : 0) - (x.b ? 1 : 0)) : SYM[R.sym].src;
+    for (const s of srcs) {
       try { const rows = s.y ? await fromYahoo(s.y, tf, a, b) : await fromBinance(s.b, tf, a, b);
-        if (rows.length >= 60) { const seen = new Set(); return { rows: rows.filter(x => !seen.has(x.t) && seen.add(x.t)).sort((p, q) => p.t - q.t), label: s.label }; } }
+        if (rows.length >= 60) { const seen = new Set(); return { rows: rows.filter(x => !seen.has(x.t) && seen.add(x.t)).sort((p, q) => p.t - q.t), label: s.label, src: s }; } }
       catch (e) { /* source suivante */ }
     }
     throw new Error('aucune source');
@@ -130,7 +132,8 @@
     catch (e) { if (seq !== R.loadSeq) return -2; R.loading = false; say(`Impossible de charger ${SYM[R.sym].name} en ${R.tf} pour cette période. Historique disponible : BTC depuis 2017 sur toutes les UT ; or et EUR/USD depuis 2020 en intraday (via Binance), plus de 10 ans en 1D / 1W ; S&P 500 : 5 à 30 min sur les derniers mois (copie qui s'allonge chaque jour), 1 h sur 2 ans, 1D / 1W sur plus de 10 ans. Essaie une UT plus grande ou une date plus récente.`, 'ko'); renderStatus(); return -1; }
     if (seq !== R.loadSeq) return -2; // une demande plus récente a pris le relais
     const all = res.rows; if (all.length && all[all.length - 1].t + sec > now) all.pop();
-    R.all = all; R.src = res.label; R.loading = false; R.endT = end;
+    R.all = all; R.src = res.label; R.srcObj = res.src; R.loading = false; R.endT = end;
+    if (!keepTime) for (const k of [...FP.keys()]) if (k.startsWith('step|')) FP.delete(k); // nouvelle période : nouveau pas de prix
     let idx = all.findIndex(x => x.t + sec > anchor); if (idx < 0) idx = all.length; // une bougie pas encore terminée n'est jamais montrée
     R.cur = Math.min(all.length, Math.max(Math.min(40, all.length), idx)); R.sub = 0; R.live = null;
     if (!keepTime) { R.startT = anchor; R.nowT = anchor; }
@@ -155,7 +158,7 @@
     series = chart.addCandlestickSeries({ upColor: up, downColor: dn, borderUpColor: up, borderDownColor: dn, wickUpColor: up, wickDownColor: dn });
     ov = box.querySelector('canvas.rp-ov'); octx = ov.getContext('2d');
     const redraw = () => requestAnimationFrame(drawOverlay);
-    chart.timeScale().subscribeVisibleLogicalRangeChange(redraw);
+    chart.timeScale().subscribeVisibleLogicalRangeChange(() => { redraw(); scheduleFP(); });
     chart.subscribeCrosshairMove(redraw);
     resizeObs = new ResizeObserver(redraw); resizeObs.observe(box);
     bindPointer(box.querySelector('.rp-c'));
@@ -174,7 +177,8 @@
     series.applyOptions({ priceFormat: { type: 'price', precision: dec(), minMove: Math.pow(10, -dec()) } });
     series.setData(visible().map(x => ({ time: x.t, open: x.o, high: x.h, low: x.l, close: x.c })));
     chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, R.cur - 130), to: R.cur + 14 });
-    priceLines(); applyMarks(); requestAnimationFrame(drawOverlay); renderStatus();
+    priceLines(); applyMarks(); requestAnimationFrame(drawOverlay); renderStatus(); scheduleFP();
+    if (R.of.delta) series.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.26 } });
   }
 
   /* ---------------- souris / tactile : tracés et glisser des lignes SL / TP ---------------- */
@@ -397,12 +401,197 @@
       g.font = '700 11px "JetBrains Mono", monospace'; g.fillText(m.lab, x - 9, m.hi ? y - 9 : y + 17); g.font = F; }
     if (R.pending) { const x = xOf(R.pending.t), y = Y(R.pending.p); if (x != null && y != null) { g.fillStyle = col.fg; g.beginPath(); g.arc(x, y, 4, 0, Math.PI * 2); g.fill(); } }
     const xs = xOf(R.startT); if (xs != null && xs > 0) { g.strokeStyle = col.acc; g.globalAlpha = .45; g.setLineDash([2, 4]); g.beginPath(); g.moveTo(xs, 0); g.lineTo(xs, H); g.stroke(); g.setLineDash([]); g.globalAlpha = 1; g.fillStyle = col.acc; g.fillText('départ', xs + 4, 26); }
+    if (R.of.fp || R.of.delta || R.of.vp) drawOrderflow(g, W, H, Y, col, F);
     // poignées « ⇕ » pour glisser stop / objectif
     const handles = []; if (R.ticket) handles.push(R.ticket); R.trades.filter(t => t.open).forEach(t => handles.push(t));
     for (const t of handles) for (const k of ['sl', 'tp']) { const y = Y(t[k]); if (y == null) continue;
       g.fillStyle = k === 'sl' ? col.bear : col.bull; g.beginPath(); if (g.roundRect) g.roundRect(W - 52, y - 9, 46, 18, 6); else g.rect(W - 52, y - 9, 46, 18); g.fill();
       g.fillStyle = '#fff'; g.fillText('⇕ ' + k.toUpperCase(), W - 47, y + 4); }
     g.restore();
+  }
+
+
+  /* ---------------- order flow : footprint, delta / CVD, profil de volume ----------------
+     Binance (BTC, or via PAXG, EUR/USDT) : transactions réelles avec le côté agresseur (aggTrades) → footprint exact ;
+     au-delà de 15 min ou si la bougie contient trop de transactions : reconstruit à partir des bougies 1 min (volume acheteur réel).
+     Yahoo (or GC, S&P 500) : seul le volume par bougie existe → répartition estimée (position de la clôture dans la bougie).
+     Seules les bougies clôturées sont calculées : aucune information du futur. */
+  const FP = new Map(), fpQueue = new Set(); let fpBusy = false, fpTimer = null;
+  const isBinance = () => !!(R.srcObj && R.srcObj.b);
+  const deltaOf = k => k.tb != null ? 2 * k.tb - k.v : (k.h > k.l ? k.v * ((k.c - k.l) - (k.h - k.c)) / (k.h - k.l) : 0);
+  const hasVol = () => R.all.slice(Math.max(0, R.cur - 50), R.cur).some(k => k.v > 0);
+  const vfmt = x => { const a = Math.abs(x); return (x < 0 ? '−' : '') + (a >= 1e6 ? (a / 1e6).toFixed(1) + 'M' : a >= 1e3 ? (a / 1e3).toFixed(a >= 1e4 ? 0 : 1) + 'k' : a >= 10 ? a.toFixed(0) : a >= 1 ? a.toFixed(1) : a.toFixed(2)); };
+  function niceStep(x) { const e = Math.pow(10, Math.floor(Math.log10(x))), f = x / e; return (f < 1.5 ? 1 : f < 2.25 ? 2 : f < 3.5 ? 2.5 : f < 7.5 ? 5 : 10) * e; }
+  function fpStep() {
+    const key = R.sym + '|' + R.tf; if (FP.has('step|' + key)) return FP.get('step|' + key);
+    const rs = R.all.slice(Math.max(0, R.cur - 80), R.cur).map(k => k.h - k.l).sort((a, b) => a - b), med = rs[rs.length >> 1] || 1;
+    const st = niceStep(med / 6); FP.set('step|' + key, st); return st;
+  }
+  function addRange(lv, lo, hi, sell, buy, st) { // répartit un volume uniformément sur les niveaux couverts
+    const a = Math.floor(lo / st), b = Math.floor(hi / st), n = b - a + 1;
+    for (let q = a; q <= b; q++) { const c = lv.get(q) || [0, 0]; c[0] += sell / n; c[1] += buy / n; lv.set(q, c); }
+  }
+  async function binJSON(path) {
+    for (const h of ['https://data-api.binance.vision', 'https://api.binance.com']) { try { return await getJSON(h + path); } catch (e) { /* hôte suivant */ } }
+    throw new Error('Binance injoignable');
+  }
+  async function computeFP(i) {
+    const k = R.all[i], sec = TF[R.tf], st = fpStep(), key = `${R.sym}|${R.tf}|${k.t}`;
+    if (FP.has(key)) return;
+    const lv = new Map(); let mode = 'est';
+    if (isBinance()) {
+      const sym = R.srcObj.b, t0 = k.t * 1000, t1 = (k.t + sec) * 1000 - 1;
+      if (sec <= 900) { // transactions réelles
+        let from = null, calls = 0, done = false;
+        while (!done && calls < 12) {
+          const j = await binJSON(`/api/v3/aggTrades?symbol=${sym}&limit=1000&` + (from == null ? `startTime=${t0}&endTime=${t1}` : `fromId=${from}`)); calls++;
+          for (const x of j) { if (x.T > t1) { done = true; break; } const p = +x.p, qv = +x.q, c = lv.get(Math.floor(p / st)) || [0, 0]; if (x.m) c[0] += qv; else c[1] += qv; lv.set(Math.floor(p / st), c); }
+          if (j.length < 1000) done = true; else from = j[j.length - 1].a + 1;
+        }
+        mode = done ? 'real' : 'mixed';
+        if (!done) lv.clear();
+      }
+      if (!lv.size) { // reconstruit à partir de sous-bougies (volume acheteur réel par minute)
+        const sub = sec >= 604800 ? '1h' : sec >= 86400 ? '5m' : '1m';
+        const j = await binJSON(`/api/v3/klines?symbol=${sym}&interval=${sub}&startTime=${t0}&endTime=${t1}&limit=1000`);
+        for (const x of j) addRange(lv, +x[3], +x[2], +x[5] - +x[9], +x[9], st);
+        mode = 'rebuilt';
+      }
+    }
+    let poc = null, best = -1, tot = 0, d = 0;
+    for (const [q, c] of lv) { const s2 = c[0] + c[1]; tot += s2; d += c[1] - c[0]; if (s2 > best) { best = s2; poc = q; } }
+    FP.set(key, { lv, st, poc, tot, d, mode });
+  }
+  function scheduleFP() {
+    if (!R.of.fp || !chart) return; clearTimeout(fpTimer);
+    fpTimer = setTimeout(async () => {
+      const rng = chart.timeScale().getVisibleLogicalRange(); if (!rng) return;
+      const a = Math.max(0, Math.floor(rng.from)), b = Math.min(R.cur - 1, Math.ceil(rng.to));
+      for (let i = b; i >= a && b - i < 60; i--) fpQueue.add(i);
+      if (fpBusy) return; fpBusy = true;
+      try {
+        while (fpQueue.size && R.of.fp) {
+          const i = Math.max(...fpQueue); fpQueue.delete(i); if (i >= R.cur) continue;
+          try { await computeFP(i); } catch (e) { FP.set(`${R.sym}|${R.tf}|${R.all[i].t}`, { lv: new Map(), st: fpStep(), poc: null, tot: 0, d: 0, mode: 'err' }); }
+          requestAnimationFrame(drawOverlay);
+        }
+      } finally { fpBusy = false; }
+    }, 250);
+  }
+  function drawOrderflow(g, W, H, Y, col, F) {
+    const ts = chart.timeScale(), rng = ts.getVisibleLogicalRange(); if (!rng || !R.cur) return;
+    const a = Math.max(0, Math.floor(rng.from)), b = Math.min(R.cur - 1, Math.ceil(rng.to));
+    const bw = Math.abs((ts.logicalToCoordinate(1) || 0) - (ts.logicalToCoordinate(0) || 0)) || 6;
+    const rgba = (hex, al) => { const h = hex.replace('#', ''); if (h.length < 6) return hex; return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${al})`; };
+    // ---- profil de volume (zone visible)
+    if (R.of.vp && b > a) {
+      let lo = Infinity, hi = -Infinity; for (let i = a; i <= b; i++) { lo = Math.min(lo, R.all[i].l); hi = Math.max(hi, R.all[i].h); }
+      const N = 48, bs = (hi - lo) / N || 1, bins = new Array(N).fill(0);
+      for (let i = a; i <= b; i++) { const k = R.all[i]; if (!k.v) continue; const x0 = Math.max(0, Math.floor((k.l - lo) / bs)), x1 = Math.min(N - 1, Math.floor((k.h - lo) / bs)); for (let q = x0; q <= x1; q++) bins[q] += k.v / (x1 - x0 + 1); }
+      const tot = bins.reduce((x, y) => x + y, 0);
+      if (tot > 0) {
+        let poc = bins.indexOf(Math.max(...bins)), lo2 = poc, hi2 = poc, acc = bins[poc];
+        while (acc < tot * 0.7 && (lo2 > 0 || hi2 < N - 1)) { const up = hi2 < N - 1 ? bins[hi2 + 1] : -1, dn = lo2 > 0 ? bins[lo2 - 1] : -1; if (up >= dn) acc += bins[++hi2]; else acc += bins[--lo2]; }
+        const maxB = Math.max(...bins), wMax = W * 0.2;
+        for (let q = 0; q < N; q++) { const y0 = Y(lo + (q + 1) * bs), y1 = Y(lo + q * bs); if (y0 == null || y1 == null) continue; const w = bins[q] / maxB * wMax;
+          g.fillStyle = q === poc ? rgba(col.acc, 0.75) : (q >= lo2 && q <= hi2 ? rgba(col.acc, 0.28) : rgba(col.mut, 0.18)); g.fillRect(W - w, Math.min(y0, y1) + 0.5, w, Math.max(1, Math.abs(y1 - y0) - 1)); }
+        const lines = [['POC', lo + (poc + 0.5) * bs], ['VAH', lo + (hi2 + 1) * bs], ['VAL', lo + lo2 * bs]];
+        for (const [lb, p] of lines) { const y = Y(p); if (y == null) continue; g.strokeStyle = col.acc; g.setLineDash(lb === 'POC' ? [] : [4, 3]); g.beginPath(); g.moveTo(W - wMax - 30, y); g.lineTo(W, y); g.stroke(); g.setLineDash([]); g.fillStyle = col.acc; g.fillText(`${lb} ${fp(p)}`, W - wMax - 30, y - 3); }
+        R.vpLast = { poc: lo + (poc + 0.5) * bs, vah: lo + (hi2 + 1) * bs, val: lo + lo2 * bs };
+      }
+    }
+    // ---- footprint
+    if (R.of.fp) {
+      const st = fpStep(), small = bw < 30;
+      for (let i = a; i <= b; i++) {
+        const f = FP.get(`${R.sym}|${R.tf}|${R.all[i].t}`), x = ts.logicalToCoordinate(i); if (!f || x == null || !f.lv.size) continue;
+        let mx = 0; for (const c of f.lv.values()) mx = Math.max(mx, c[0] + c[1]);
+        const x0 = x - bw * 0.48, cw = bw * 0.96;
+        for (const [q, c] of f.lv) {
+          const y0 = Y((q + 1) * st), y1 = Y(q * st); if (y0 == null || y1 == null) continue;
+          const top = Math.min(y0, y1), rh = Math.max(1, Math.abs(y1 - y0)), d = c[1] - c[0], vol = c[0] + c[1];
+          const below = f.lv.get(q - 1), above = f.lv.get(q + 1);
+          const bImb = below && c[1] >= 3 * Math.max(below[0], 1e-12) && c[1] > 0, sImb = above && c[0] >= 3 * Math.max(above[1], 1e-12) && c[0] > 0;
+          g.fillStyle = rgba(d >= 0 ? col.bull : col.bear, 0.08 + 0.5 * vol / mx); g.fillRect(x0, top, cw, rh - (rh > 3 ? 1 : 0));
+          if (q === f.poc) { g.strokeStyle = col.acc; g.lineWidth = 1.5; g.strokeRect(x0 + 0.5, top + 0.5, cw - 1, rh - 1); g.lineWidth = 1; }
+          if (!small && rh >= 10 && bw >= 58) {
+            g.font = '600 9.5px "JetBrains Mono", monospace';
+            g.fillStyle = sImb ? col.bear : col.mut; g.fillText(vfmt(c[0]), x0 + 2, top + rh / 2 + 3);
+            const bt = vfmt(c[1]); g.fillStyle = bImb ? col.bull : col.mut; g.fillText(bt, x0 + cw - 2 - g.measureText(bt).width, top + rh / 2 + 3); g.font = F;
+          } else if (bImb || sImb) { g.fillStyle = bImb ? col.bull : col.bear; g.fillRect(bImb ? x0 + cw - 3 : x0, top, 3, rh); }
+        }
+        if (bw >= 26) { const yl = Y(R.all[i].l); if (yl != null) { g.font = '700 9.5px "JetBrains Mono", monospace'; g.fillStyle = f.d >= 0 ? col.bull : col.bear; const tx = 'Δ' + vfmt(f.d); g.fillText(tx, x - g.measureText(tx).width / 2, yl + 13); g.font = F; } }
+      }
+      const any = [...Array(Math.max(0, b - a + 1)).keys()].map(j => FP.get(`${R.sym}|${R.tf}|${R.all[a + j].t}`)).find(Boolean);
+      if (any) { g.fillStyle = col.mut; g.fillText(`Footprint ${any.mode === 'real' ? 'réel (transactions Binance)' : any.mode === 'rebuilt' ? 'reconstruit (volume acheteur / vendeur par minute)' : any.mode === 'est' ? 'estimé (volume sans côté agresseur)' : ''} · pas ${fp(st)} · vendeurs × acheteurs`, 8, 40); }
+    }
+    // ---- delta et CVD (bandeau du bas)
+    if (R.of.delta && hasVol()) {
+      const top = H * 0.79, bot = H - 8, mid = (top + bot) / 2, hh = (bot - top) / 2;
+      let md = 1e-12, cv = 0, cvs = [], cmin = Infinity, cmax = -Infinity;
+      for (let i = 0; i <= b; i++) { cv += deltaOf(R.all[i]); if (i >= a) { cvs.push([i, cv]); cmin = Math.min(cmin, cv); cmax = Math.max(cmax, cv); md = Math.max(md, Math.abs(deltaOf(R.all[i]))); } }
+      g.fillStyle = rgba(css('chart-bg').startsWith('#') ? css('chart-bg') : '#0b1018', 0.75); g.fillRect(0, top - 4, W, bot - top + 8);
+      g.strokeStyle = col.faint; g.beginPath(); g.moveTo(0, mid); g.lineTo(W, mid); g.stroke();
+      for (let i = a; i <= b; i++) { const x = ts.logicalToCoordinate(i); if (x == null) continue; const d = deltaOf(R.all[i]), h = d / md * hh;
+        g.fillStyle = rgba(d >= 0 ? col.bull : col.bear, 0.75); g.fillRect(x - Math.max(1, bw * 0.35), h >= 0 ? mid - h : mid, Math.max(2, bw * 0.7), Math.abs(h)); }
+      if (cvs.length > 1 && cmax > cmin) { g.strokeStyle = col.acc; g.lineWidth = 1.6; g.beginPath(); cvs.forEach(([i, v], j) => { const x = ts.logicalToCoordinate(i), y = bot - (v - cmin) / (cmax - cmin) * (bot - top); if (j) g.lineTo(x, y); else g.moveTo(x, y); }); g.stroke(); g.lineWidth = 1; }
+      const real = R.all[Math.max(0, b)].tb != null;
+      g.fillStyle = col.mut; g.fillText(`Δ delta par bougie · CVD (ligne) · ${real ? 'volume acheteur réel (Binance)' : 'estimé'}`, 6, top + 6);
+    }
+  }
+  /* Lecture order flow par le professeur */
+  function ofRead() {
+    if (!R.cur) return;
+    if (!hasVol()) { say(`Pas de volume pour ${SYM[R.sym].name} sur cette source (${esc(R.src)}) : l'order flow est impossible. ${SYM[R.sym].src.some(x => x.b) ? 'Active le footprint : je basculerai sur la source Binance qui fournit les transactions.' : ''}`, 'warn'); return; }
+    const n = R.cur, A = Math.max(0, n - 40), ks = R.all.slice(A, n), ds = ks.map(deltaOf), real = ks[ks.length - 1].tb != null, out = [];
+    const avgV = ks.reduce((x, k) => x + k.v, 0) / ks.length;
+    let cvd = 0; const cv = ds.map(d => (cvd += d));
+    // tendance de la pression : prix vs CVD sur 20 bougies
+    const m = ks.length, pr = ks[m - 1].c - ks[Math.max(0, m - 20)].c, cd = cv[m - 1] - cv[Math.max(0, m - 20)];
+    out.push([Math.sign(pr) === Math.sign(cd) ? 'ok' : 'warn', 'Pression acheteurs / vendeurs', `Sur 20 bougies, le prix ${pr >= 0 ? 'monte' : 'baisse'} et le CVD ${cd >= 0 ? 'monte' : 'baisse'} (${vfmt(cd)}). ${Math.sign(pr) === Math.sign(cd) ? 'Le mouvement est soutenu par les ordres agressifs : il est sain.' : 'Divergence : le prix avance sans que les ordres agressifs suivent, le mouvement s\'essouffle (souvent avant un retournement).'}`]);
+    // divergence sur les extrêmes
+    const lowIdx = (from, to) => { let j = from; for (let q = from; q < to; q++) if (ks[q].l < ks[j].l) j = q; return j; };
+    const hiIdx = (from, to) => { let j = from; for (let q = from; q < to; q++) if (ks[q].h > ks[j].h) j = q; return j; };
+    if (m > 12) {
+      const l1 = lowIdx(0, m - 6), l2 = lowIdx(m - 6, m), h1 = hiIdx(0, m - 6), h2 = hiIdx(m - 6, m);
+      if (ks[l2].l < ks[l1].l && cv[l2] > cv[l1]) out.push(['ok', 'Divergence haussière', `Nouveau plus bas (${fp(ks[l2].l)}) mais CVD plus haut qu'au creux précédent : les vendeurs agressifs s'épuisent. Combiné à un sweep de liquidité, c'est un signal SMC fort d'achat.`]);
+      if (ks[h2].h > ks[h1].h && cv[h2] < cv[h1]) out.push(['ok', 'Divergence baissière', `Nouveau plus haut (${fp(ks[h2].h)}) mais CVD plus bas : les acheteurs agressifs s'épuisent. Typique d'une prise de liquidité au-dessus des sommets avant une baisse.`]);
+    }
+    // absorption
+    for (let q = m - 1; q >= Math.max(0, m - 10); q--) { const k = ks[q], rg = k.h - k.l, body = Math.abs(k.c - k.o);
+      if (k.v > 1.8 * avgV && rg > 0 && body < 0.35 * rg) { const d = ds[q];
+        if ((d < 0 && k.c >= k.o) || (d > 0 && k.c <= k.o)) { out.push(['tip', 'Absorption', `Bougie du ${fT(k.t)} : volume ${(k.v / avgV).toFixed(1)}× la moyenne, petit corps, delta ${vfmt(d)} mais clôture ${k.c >= k.o ? 'haussière' : 'baissière'}. Les ${d < 0 ? 'vendeurs' : 'acheteurs'} agressifs ont été absorbés par des ordres limites : zone à surveiller pour un retournement ${d < 0 ? 'haussier' : 'baissier'}.`]); break; } } }
+    // déséquilibres empilés du footprint
+    if (R.of.fp) {
+      const fx = teacherView(), zones = fx.obs.concat(fx.fvgs);
+      for (let q = n - 1; q >= Math.max(0, n - 12); q--) { const f = FP.get(`${R.sym}|${R.tf}|${R.all[q].t}`); if (!f || !f.lv.size) continue;
+        const qs = [...f.lv.keys()].sort((x, y) => x - y); let run = 0, runS = 0, st = null, dir = 0;
+        for (const lv of qs) { const c = f.lv.get(lv), b0 = f.lv.get(lv - 1), a0 = f.lv.get(lv + 1);
+          const bi = b0 && c[1] >= 3 * Math.max(b0[0], 1e-12), si = a0 && c[0] >= 3 * Math.max(a0[1], 1e-12);
+          run = bi ? run + 1 : 0; runS = si ? runS + 1 : 0;
+          if (run >= 3 && !st) { st = lv * f.st; dir = 1; } if (runS >= 3 && !st) { st = lv * f.st; dir = -1; } }
+        if (st) { const inZone = zones.some(z => z.dir === dir && st >= z.bot - fx.atr * 0.5 && st <= z.top + fx.atr * 0.5);
+          out.push(['ok', 'Déséquilibres empilés', `Bougie du ${fT(R.all[q].t)} : au moins 3 niveaux de suite où les ${dir === 1 ? 'acheteurs' : 'vendeurs'} dominent à plus de 300 % (vers ${fp(st)}). ${inZone ? `Ils se trouvent sur un ${dir === 1 ? 'OB / FVG haussier' : 'OB / FVG baissier'} : <b>confirmation order flow de la zone SMC</b>.` : 'Ces niveaux servent souvent de support / résistance lors d\'un retour.'}`]); break; }
+      }
+    }
+    if (R.vpLast && R.of.vp) { const px = ks[m - 1].c, v = R.vpLast;
+      out.push(['info', 'Profil de volume', `POC ${fp(v.poc)} (prix le plus échangé), zone de valeur ${fp(v.val)} – ${fp(v.vah)}. ${px > v.vah ? 'Prix au-dessus de la valeur : acceptation haussière si ça tient, sinon retour vers le POC.' : px < v.val ? 'Prix sous la valeur : acceptation baissière si ça tient, sinon retour vers le POC.' : 'Prix dans la valeur : marché en équilibre, les extrémités VAH / VAL sont les zones de réaction.'}`]); }
+    say(`<b>Lecture order flow du professeur</b> (${real ? 'volume acheteur / vendeur réel, Binance' : 'données estimées : seul le volume total est connu'}) :`, 'tip');
+    out.forEach(o => say(`<b>${o[1]}</b> — ${o[2]}`, o[0]));
+  }
+  async function toggleOF(k) {
+    R.of[k] = !R.of[k];
+    if (R.of[k] && (k === 'fp' || k === 'delta') && !isBinance() && SYM[R.sym].src.some(x => x.b)) {
+      R.ofBinance = true; say(`Pour un order flow réel, je bascule ${SYM[R.sym].name} sur la source Binance (${SYM[R.sym].src.find(x => x.b).label}), qui fournit chaque transaction et son côté acheteur / vendeur.`, 'info');
+      if (R.all.length) await load(true);
+    } else if (R.of[k] && !hasVol()) say(`Pas de volume disponible pour cette source : ${k === 'vp' ? 'profil de volume' : 'order flow'} impossible ici.`, 'warn');
+    else if (R.of[k] && !isBinance()) say(`${SYM[R.sym].name} : pas de transactions publiques gratuites, l'order flow est <b>estimé</b> à partir du volume de chaque bougie (indicatif).`, 'warn');
+    if (k === 'fp' && chart) chart.timeScale().applyOptions({ rightOffset: R.of.fp ? 3 : 14 });
+    if (k === 'fp' && R.of.fp && chart && !isBinance()) { R.of.fp = false; say(`Footprint indisponible pour ${SYM[R.sym].name} : il faut les transactions une par une (côté acheteur / vendeur), que seule la source Binance fournit gratuitement. Le delta et le profil de volume restent disponibles (estimés).`, 'warn'); renderTools(); return; }
+    if (k === 'fp' && R.of.fp && chart) { chart.timeScale().applyOptions({ barSpacing: 62 }); chart.timeScale().scrollToRealTime(); scheduleFP();
+      say('Footprint : chaque bougie montre, niveau par niveau, le volume <b>vendeur × acheteur</b> agressif. Cadre doré = POC de la bougie. Chiffre en couleur = déséquilibre (≥ 300 % en diagonale). Δ sous la bougie = acheteurs − vendeurs. Zoome / dézoome pour plus ou moins de détail.', 'tip'); }
+    if (k === 'delta' && chart) series.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: R.of.delta ? 0.26 : 0.1 } });
+    renderTools(); requestAnimationFrame(drawOverlay);
   }
 
   /* ---------------- le professeur ---------------- */
@@ -542,6 +731,8 @@
     const kz = sessionOf(cursorTime());
     if (kz === 'Londres' || kz === 'New York AM') { sKZ = 5; out.push(['ok', 'Session', `Entrée pendant la kill zone ${kz}.`]); }
     else out.push(['warn', 'Session', `Entrée ${kz ? 'en session ' + kz : 'hors kill zone'} : en dehors de Londres / New York AM, les mouvements sont moins fiables.`]);
+    if (hasVol()) { const d3 = R.all.slice(Math.max(0, R.cur - 3), R.cur).reduce((x, k) => x + deltaOf(k), 0), real = R.all[R.cur - 1].tb != null;
+      out.push([Math.sign(d3) === t.dir ? 'ok' : 'warn', 'Order flow', `Delta des 3 dernières bougies : ${vfmt(d3)} (${real ? 'réel' : 'estimé'}). ${Math.sign(d3) === t.dir ? 'Les ordres agressifs vont dans le sens de ton trade.' : 'Les ordres agressifs vont contre ton trade : attends une absorption ou un retournement du delta.'}`]); }
     const decision = sDir + sLoc + sSL + sRR + sKZ;
     return { notes: an.notes.concat(out), total: an.sStruct + an.sTrend + an.sZones + decision, analysis: an.sStruct + an.sTrend + an.sZones, decision, rr,
       errors: out.filter(o => o[0] === 'ko').map(o => o[1]).concat(an.notes.filter(o => o[0] === 'ko').map(o => o[1])) };
@@ -557,7 +748,7 @@
     R.live.c = px; R.live.h = Math.max(R.live.h, px); R.live.l = Math.min(R.live.l, px);
     series.update({ time: k.t, open: R.live.o, high: R.live.h, low: R.live.l, close: R.live.c });
     for (const t of R.trades) if (t.open) checkTrade(t, prev, px, k.t);
-    if (++R.sub >= 4) { R.sub = 0; R.live = null; R.cur++; R.nowT = Math.max(R.nowT, cursorTime()); onCandleClosed(); }
+    if (++R.sub >= 4) { R.sub = 0; R.live = null; R.cur++; R.nowT = Math.max(R.nowT, cursorTime()); onCandleClosed(); if (R.of.fp) scheduleFP(); }
     return true;
   }
   function play() {
@@ -738,7 +929,8 @@
           if (e && e.at === R.cur - 1 && e.dir === g.bias) { ev = e; return true; } return false; }, 220, 30);
         g.confirmed = !!ev;
         if (ev) { R.draws.push(P({ type: 'mss', t1: ev.tFrom, t2: ev.t, p1: ev.level, dir: ev.dir, ok: true, label: ev.kind + ' 5m (prof)' })); requestAnimationFrame(drawOverlay);
-          say(`<b>Confirmation !</b> ${ev.kind} ${dirW(ev.dir)} à ${fp(ev.level)} (${fT(ev.t)}) pendant la kill zone, dans le sens du biais. On peut préparer l'entrée.`, 'ok'); }
+          const kc = R.all[R.cur - 1], dk = deltaOf(kc);
+          say(`<b>Confirmation !</b> ${ev.kind} ${dirW(ev.dir)} à ${fp(ev.level)} (${fT(ev.t)}) pendant la kill zone, dans le sens du biais.${kc.v ? ` Order flow de la bougie de cassure : delta ${vfmt(dk)} ${kc.tb != null ? '(réel)' : '(estimé)'}, ${Math.sign(dk) === g.bias ? 'les ordres agressifs confirment la cassure' : 'attention, les ordres agressifs ne suivent pas'}.` : ''} On peut préparer l'entrée.`, 'ok'); }
         else say('Pas de confirmation propre pendant les kill zones : <b>le professeur ne trade pas</b>. Ne pas trader est aussi une bonne décision.', 'warn'); } },
     { tf: '5m', title: 'Entrée, stop et objectif', desc: 'Le professeur place l\'ordre : stop sous la structure, objectif sur la liquidité.',
       run: async g => { if (!g.confirmed) { say('<b>10.</b> Pas de confirmation, donc pas d\'entrée.', 'info'); return; }
@@ -839,7 +1031,7 @@
       </div>`;
     const q = s => root.querySelector(`[data-rp="${s}"]`);
     q('back').onclick = () => { destroyChart(); if (onBack) onBack(); };
-    q('sym').onclick = e => { const b = e.target.closest('button'); if (!b) return; if (R.trades.some(t => t.open)) { say('Clôture tes positions avant de changer de marché.', 'warn'); return; } R.sym = b.dataset.v; lsSet('at:rp:sym', R.sym); renderSetup(); };
+    q('sym').onclick = e => { const b = e.target.closest('button'); if (!b) return; if (R.trades.some(t => t.open)) { say('Clôture tes positions avant de changer de marché.', 'warn'); return; } R.ofBinance = false; R.sym = b.dataset.v; lsSet('at:rp:sym', R.sym); renderSetup(); };
     q('tf').onclick = async e => { const b = e.target.closest('button'); if (!b || b.dataset.v === R.tf) return;
       if (R.trades.some(t => t.open)) { say('Clôture tes positions avant de changer d\'unité de temps.', 'warn'); return; }
       const was = R.all.length > 0; R.tf = b.dataset.v; lsSet('at:rp:tf', R.tf); renderSetup();
@@ -879,16 +1071,17 @@
   }
   const TB = [['cursor'], '|', ['HH'], ['HL'], ['LH'], ['LL'], '|', ['ob'], ['fvg'], ['mss'], '|', ['fib'], ['autofib', 'Fib', 'Fibonacci automatique (dernière jambe)', 'A'], '|', ['hline'], ['tline'], '|', ['erase'],
     '|', ['magnet', '🧲', 'Aimant sur les mèches', 'M'], ['hide', '👁', 'Masquer / afficher les tracés', ''], ['undo', '↶', 'Annuler (Ctrl+Z)', ''], ['redo', '↷', 'Rétablir (Ctrl+Y)', ''],
-    ['full', '⛶', 'Plein écran', 'F'], ['clear', '✕', 'Tout effacer', '']];
+    ['full', '⛶', 'Plein écran', 'F'], ['clear', '✕', 'Tout effacer', ''],
+    '|', ['fp', 'FP', 'Footprint order flow (vendeurs × acheteurs par niveau)', 'O'], ['delta', 'Δ', 'Delta et CVD (pression acheteurs / vendeurs)', 'D'], ['vp', 'VP', 'Profil de volume (POC, VAH, VAL)', 'V'], ['ofread', 'OF', 'Lecture order flow du professeur', '']];
   const KEYS = { cursor: 'Échap', hline: 'H', tline: 'T', fib: 'B', erase: 'E' };
   function renderTools() {
     const el = R.root && R.root.querySelector('[data-rp="tools"]'); if (!el) return;
     el.innerHTML = TB.map(x => {
       if (x === '|') return '<i class="rp-sep"></i>';
       const def = TOOLS.find(t => t[0] === x[0]) || [x[0], x[1], x[2]], k = def[0], icon = def[1], label = def[2];
-      const on = k === R.tool || (k === 'magnet' && R.magnet) || (k === 'hide' && R.hideDraws) || (k === 'full' && R.root.querySelector('.rp-left.rp-full'));
+      const on = k === R.tool || ((k === 'fp' || k === 'delta' || k === 'vp') && R.of[k]) || (k === 'magnet' && R.magnet) || (k === 'hide' && R.hideDraws) || (k === 'full' && R.root.querySelector('.rp-left.rp-full'));
       const key = KEYS[k] || x[3] || '';
-      return `<button type="button" class="rp-tool${k === 'autofib' ? ' gold' : ''}" data-tool="${k}" aria-pressed="${!!on}" aria-label="${esc(label)}"><b>${icon}</b><span class="tt">${esc(label)}${key ? ` <kbd>${esc(key)}</kbd>` : ''}</span></button>`;
+      return `<button type="button" class="rp-tool${k === 'autofib' || k === 'ofread' ? ' gold' : ''}${k === 'fp' || k === 'delta' || k === 'vp' ? ' of' : ''}" data-tool="${k}" aria-pressed="${!!on}" aria-label="${esc(label)}"><b>${icon}</b><span class="tt">${esc(label)}${key ? ` <kbd>${esc(key)}</kbd>` : ''}</span></button>`;
     }).join('');
     el.onclick = e => { const b = e.target.closest('button'); if (!b) return; toolAction(b.dataset.tool); };
   }
@@ -896,6 +1089,8 @@
     if (k === 'clear') { if (R.draws.length) { commit(); R.draws = []; } R.pending = null; requestAnimationFrame(drawOverlay); return; }
     if (k === 'autofib') { autoFib(); return; }
     if (k === 'undo') { undo(); return; }
+    if (k === 'fp' || k === 'delta' || k === 'vp') { toggleOF(k); return; }
+    if (k === 'ofread') { if (!R.of.delta) toggleOF('delta').then(ofRead); else ofRead(); return; }
     if (k === 'redo') { redo(); return; }
     if (k === 'magnet') { R.magnet = !R.magnet; lsSet('at:rp:mag', R.magnet); renderTools(); renderStatus(R.magnet ? 'Aimant activé : les points se collent aux mèches.' : 'Aimant désactivé.'); return; }
     if (k === 'hide') { R.hideDraws = !R.hideDraws; renderTools(); requestAnimationFrame(drawOverlay); return; }
@@ -923,6 +1118,9 @@
     else if (k === 'a' || k === 'A') toolAction('autofib');
     else if (k === 'm' || k === 'M') toolAction('magnet');
     else if (k === 'f' || k === 'F') toolAction('full');
+    else if (k === 'o' || k === 'O') toolAction('fp');
+    else if (k === 'd' || k === 'D') toolAction('delta');
+    else if (k === 'v' || k === 'V') toolAction('vp');
   });
   const SPEEDS = [0.25, 0.5, 1, 3, 10, 30, 100];
   function renderControls() {

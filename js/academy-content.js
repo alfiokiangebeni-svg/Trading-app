@@ -14,6 +14,18 @@ window.ATAcademyContent = (function () {
       <g class="cdl"><line x1="200" y1="18" x2="200" y2="95"/><rect x="192" y="50" width="16" height="35" class="r"/></g>
       <g class="cdl"><line x1="240" y1="55" x2="240" y2="140"/><rect x="232" y="65" width="16" height="60" class="r"/></g>
       <text x="150" y="14" class="lb accent">sweep : mèche au-dessus</text><text x="130" y="146" class="lb accent">puis clôture dessous</text></svg>`,
+    footprint: `<svg viewBox="0 0 330 150" class="schema" style="max-width:560px"><g font-family="JetBrains Mono, monospace" font-size="9">
+      <rect x="40" y="20" width="70" height="110" fill="none" stroke="var(--line-strong)"/>
+      <rect x="41" y="21" width="68" height="17" class="zone bear"/><text x="46" y="33" class="lb">120 × 35</text>
+      <rect x="41" y="39" width="68" height="17" class="zone bear"/><text x="46" y="51" class="lb">310 × 90</text>
+      <rect x="41" y="57" width="68" height="17" class="zone fvg" stroke="var(--accent)" stroke-width="2"/><text x="46" y="69" class="lb accent">640 × 610</text>
+      <rect x="41" y="75" width="68" height="17" class="zone bull"/><text x="46" y="87" class="lb">150 × 480</text>
+      <rect x="41" y="93" width="68" height="17" class="zone bull"/><text x="46" y="105" class="lb up">60 × 520</text>
+      <rect x="41" y="111" width="68" height="17" class="zone bull"/><text x="46" y="123" class="lb up">40 × 300</text></g>
+      <text x="118" y="70" class="lb accent">← POC (le plus échangé)</text>
+      <text x="118" y="112" class="lb up">← déséquilibres empilés</text>
+      <text x="118" y="34" class="lb">vendeurs × acheteurs</text>
+      <text x="40" y="146" class="lb">Δ bougie = acheteurs − vendeurs = +1 255</text></svg>`,
     fvg: `<svg viewBox="0 0 320 150" class="schema"><rect x="70" y="58" width="230" height="30" class="zone fvg"/><text x="185" y="78" class="lb accent">FVG (déséquilibre)</text>
       <g class="cdl"><line x1="60" y1="85" x2="60" y2="135"/><rect x="52" y="95" width="16" height="30" class="b"/></g>
       <g class="cdl"><line x1="100" y1="30" x2="100" y2="120"/><rect x="92" y="40" width="16" height="70" class="b"/></g>
@@ -85,6 +97,18 @@ window.ATAcademyContent = (function () {
       keys: ['Le plan d\'abord', 'Pas de trade de revanche', 'Tout noter, relire chaque semaine'],
       quiz: [{ q: 'Après 3 pertes dans la journée (−3 %), que faire ?', a: ['Doubler la taille pour se refaire', 'Arrêter pour la journée', 'Changer de stratégie'], ok: 1, why: 'La limite journalière protège le capital et le mental.' }] }
   ];
+
+  theory.push({ id: 't7', title: 'Order flow : footprint, delta et profil de volume', min: 4, svg: 'footprint',
+    body: `<p>Le graphique en bougies montre <i>où</i> le prix est allé. L'<b>order flow</b> montre <i>qui</i> l'a poussé : les ordres <b>agressifs</b> (au marché) contre les ordres <b>passifs</b> (limites).</p>
+      <p><b>Footprint</b> : chaque bougie est découpée en niveaux de prix. À chaque niveau : volume vendu au marché × volume acheté au marché. Le <b>POC</b> est le niveau le plus échangé. Un <b>déséquilibre</b> apparaît quand un côté domine l'autre à plus de 300 % (en diagonale) ; trois déséquilibres empilés forment une zone que le prix respecte souvent au retour.</p>
+      <p><b>Delta</b> = acheteurs agressifs − vendeurs agressifs, pour une bougie. Le <b>CVD</b> est son cumul. Prix et CVD qui montent ensemble = mouvement sain. Nouveau plus bas avec un CVD plus haut = <b>divergence</b> : les vendeurs s'épuisent.</p>
+      <p><b>Absorption</b> : énorme volume, petit corps, delta très négatif mais clôture haussière → des acheteurs limites ont tout encaissé. Sur un sweep de liquidité SMC, c'est la confirmation idéale.</p>
+      <p><b>Profil de volume</b> : volume par prix sur une période. POC = aimant, zone de valeur (70 % du volume, entre VAL et VAH) = équilibre ; en sortir et y rester = nouvelle tendance.</p>
+      <p>Dans l'app : boutons <b>FP</b>, <b>Δ</b>, <b>VP</b> et <b>OF</b> (lecture du professeur) du simulateur. BTC, or (PAXG) et EUR/USDT ont un order flow réel (transactions Binance) ; or COMEX et S&P 500 sont estimés à partir du volume.</p>`,
+    keys: ['Footprint = vendeurs × acheteurs à chaque prix', 'Delta / CVD = qui pousse vraiment', 'Divergence ou absorption sur un sweep = retournement probable', 'Le POC attire le prix, la zone de valeur = équilibre'],
+    quiz: [{ q: 'Le prix fait un nouveau plus bas mais le CVD fait un plus bas plus haut. On parle de…', a: ['divergence haussière', 'continuation baissière', 'absorption vendeuse'], ok: 0, why: 'Les vendeurs agressifs poussent moins fort : le mouvement baissier s\'essouffle.' },
+      { q: 'Énorme volume, petit corps, delta très négatif, clôture haussière :', a: ['les vendeurs dominent', 'absorption : des acheteurs limites encaissent la vente', 'aucune information'], ok: 1, why: 'Les ventes au marché sont absorbées par des ordres d\'achat passifs.' },
+      { q: 'Trois déséquilibres acheteurs empilés sur un FVG haussier :', a: ['confirment la zone d\'achat', 'invalident le FVG', 'n\'ont aucun lien'], ok: 0, why: 'L\'order flow confirme que les acheteurs défendent la zone SMC.' }] });
 
   /* ---------- méthode pas à pas ---------- */
   const steps = [

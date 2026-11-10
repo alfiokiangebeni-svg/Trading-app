@@ -325,3 +325,8 @@ body.rp-noscroll{overflow:hidden}
   .rp-left.rp-full .rp-body{height:calc(100vh - 150px);grid-template-rows:auto minmax(0,1fr)}
   .rp-left.rp-full .rp-chart{height:auto;min-height:0}
 }
+
+/* order flow */
+.rp-tool.of{border-color:rgba(31,224,161,.35)}
+.rp-tool.of[aria-pressed="true"]{border-color:var(--bull);background:var(--bull-soft);color:var(--bull)}
+.rp-tool.of[aria-pressed="true"] b{color:var(--bull)}

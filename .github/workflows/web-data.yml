@@ -61,8 +61,8 @@ jobs:
                   except Exception as e:
                       print("indisponible", sym, interval, e); continue
                   q = res["indicators"]["quote"][0]
-                  rows = {t: [t, round(o, 6), round(h, 6), round(l, 6), round(c, 6)] for t, o, h, l, c in
-                          zip(res["timestamp"], q["open"], q["high"], q["low"], q["close"]) if None not in (o, h, l, c)}
+                  rows = {t: [t, round(o, 6), round(h, 6), round(l, 6), round(c, 6), int(v or 0)] for t, o, h, l, c, v in
+                          zip(res["timestamp"], q["open"], q["high"], q["low"], q["close"], q.get("volume") or [0] * len(res["timestamp"])) if None not in (o, h, l, c)}
                   # l'historique s'allonge : on garde les bougies déjà copiées les jours précédents
                   if res["meta"].get("dataGranularity") not in (interval, "1h" if interval == "60m" else interval):
                       print("granularité inattendue", sym, interval, res["meta"].get("dataGranularity")); continue
@@ -70,7 +70,7 @@ jobs:
                       old_url = f"https://raw.githubusercontent.com/${{ github.repository }}/data/market/{name}_{tag}.json"
                       with urllib.request.urlopen(old_url, timeout=60) as r:
                           for row in json.load(r).get("rows", []):
-                              if tag != "1d" or len(rows) < 1000: rows.setdefault(row[0], row)  # ne pas mélanger l'ancienne copie mensuelle
+                              if tag != "1d" or len(rows) < 1000: rows.setdefault(row[0], row if len(row) > 5 else row + [0])  # volume ajouté en 2.5
                   except Exception as e:
                       print("pas d'ancienne copie", name, tag, e)
                   out = [rows[k] for k in sorted(rows)]
