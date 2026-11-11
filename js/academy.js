@@ -18,8 +18,8 @@
     const item = (x, i, part) => `<button class="lesson ${P.done[x.id] ? 'done' : ''}" data-open="${x.id}" type="button">
       <span class="ln-n">${P.done[x.id] ? '✓' : (part === 't' ? i + 1 : i + 1)}</span><span class="ln-t">${esc(x.title.replace(/^Étape \d+ · /, ''))}</span>
       <span class="ln-m">${x.min ? x.min + ' min' : 'pratique'}</span></button>`;
-    return `
-      <div class="sec-h"><h2>Académie</h2><p>Apprendre le trading SMC, ICT et price action, de la théorie à l'analyse en direct</p></div>
+    return (window.ATXauAcad ? window.ATXauAcad.homeHTML() : '') + `
+      <div class="sec-h xa-sep"><h2>Fondamentaux et simulateur</h2><p>Tous marchés : bases SMC, ICT et price action, méthode pas à pas, analyse en direct et simulateur</p></div>
       <div class="card ac-hero">
         <div><span class="lbl">Votre progression</span><b class="big">${pr.pct} %</b><span class="sub">${pr.d} / ${pr.n} modules terminés</span>
           <div class="bar"><i style="width:${pr.pct}%"></i></div></div>
@@ -126,6 +126,7 @@
     }
     if (replayOn) { window.ATReplay.unmount(); replayOn = false; }
     root.classList.remove('wide');
+    if (window.ATXauAcad) { window.ATXauAcad.unmount(); if (window.ATXauAcad.isRoute(current)) { window.ATXauAcad.render(root, current, () => goBack()); return; } }
     root.innerHTML = current === 'live' ? live() : current ? lesson(all().find(x => x.id === current)) : home();
     bind(root);
   }

@@ -1,6 +1,6 @@
 {
   "name": "alerte-trading",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "private": true,
   "description": "Alerte Trading : analyse Or et Bitcoin (SMC, CRT, Price Action), signaux, backtest.",
   "scripts": {
